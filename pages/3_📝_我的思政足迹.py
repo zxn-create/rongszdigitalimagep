@@ -610,6 +610,8 @@ def render_sidebar():
             st.switch_page("main.py")
         if st.button("🔬 图像处理实验室", use_container_width=True):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
+        if st.button("📤 实验作业提交", use_container_width=True):
+            st.switch_page("pages/实验作业提交.py")
         if st.button("📚 学习资源中心", use_container_width=True):
             st.switch_page("pages/2_📚_学习资源中心.py")
         if st.button("📝 我的思政足迹", use_container_width=True):

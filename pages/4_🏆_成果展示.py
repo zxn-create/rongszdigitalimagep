@@ -5,6 +5,11 @@ import datetime
 import sqlite3
 import json
 import os
+import zipfile
+import tempfile
+import shutil
+import csv
+import io
 
 st.set_page_config(
     page_title="思政成果展示", 
@@ -12,6 +17,48 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 设置时区为北京时间
+def get_beijing_time():
+    """获取北京时间"""
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+
+def format_beijing_time(timestamp):
+    """格式化时间为北京时间字符串"""
+    if timestamp is None:
+        return ""
+    
+    if isinstance(timestamp, str):
+        try:
+            # 尝试解析字符串时间
+            if 'T' in timestamp:
+                dt = datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            else:
+                # 尝试多种时间格式
+                for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f']:
+                    try:
+                        dt = datetime.datetime.strptime(timestamp, fmt)
+                        break
+                    except:
+                        continue
+                else:
+                    return timestamp
+            
+            # 转换为北京时间
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            beijing_tz = datetime.timezone(datetime.timedelta(hours=8))
+            return dt.astimezone(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')
+        except:
+            return timestamp
+    
+    elif isinstance(timestamp, datetime.datetime):
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=datetime.timezone.utc)
+        beijing_tz = datetime.timezone(datetime.timedelta(hours=8))
+        return timestamp.astimezone(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')
+    
+    return str(timestamp)
 
 # 现代化米色思政主题CSS
 def apply_modern_css():
@@ -248,28 +295,54 @@ def apply_modern_css():
     </style>
     """, unsafe_allow_html=True)
 
-# 初始化数据库
+# 初始化数据库 - 修复版本
 def init_database():
-    """初始化数据库表"""
+    """初始化数据库表 - 修复FOREIGN KEY错误"""
     try:
         conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
-        # 创建作品提交表
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS submitted_projects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_name TEXT NOT NULL,
-                author_name TEXT NOT NULL,
-                project_desc TEXT NOT NULL,
-                submit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                files TEXT,
-                status TEXT DEFAULT '待审核',
-                review_notes TEXT,
-                review_time TIMESTAMP,
-                reviewer TEXT
-            )
-        ''')
+        # 检查 submitted_projects 表是否存在并获取其列信息
+        c.execute("PRAGMA table_info(submitted_projects)")
+        existing_columns = [column[1] for column in c.fetchall()]
+        
+        # 如果表不存在，创建完整的表结构（不带外键约束）
+        if not existing_columns:
+            c.execute('''
+                CREATE TABLE submitted_projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_name TEXT NOT NULL,
+                    author_name TEXT NOT NULL,
+                    project_desc TEXT NOT NULL,
+                    submit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    files TEXT,
+                    file_paths TEXT,
+                    status TEXT DEFAULT '待审核',
+                    review_notes TEXT,
+                    review_time TIMESTAMP,
+                    reviewer TEXT,
+                    user_id INTEGER
+                )
+            ''')
+        else:
+            # 检查并添加缺失的字段
+            if 'file_paths' not in existing_columns:
+                try:
+                    c.execute('ALTER TABLE submitted_projects ADD COLUMN file_paths TEXT')
+                except:
+                    pass
+            
+            if 'reviewer' not in existing_columns:
+                try:
+                    c.execute('ALTER TABLE submitted_projects ADD COLUMN reviewer TEXT')
+                except:
+                    pass
+            
+            if 'user_id' not in existing_columns:
+                try:
+                    c.execute('ALTER TABLE submitted_projects ADD COLUMN user_id INTEGER')
+                except:
+                    pass
         
         # 创建意见反馈表
         c.execute('''
@@ -282,12 +355,25 @@ def init_database():
             )
         ''')
         
+        # 创建用户表（如果不存在）
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT DEFAULT 'student',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         conn.commit()
         conn.close()
+        return True
     except Exception as e:
         st.error(f"数据库初始化失败：{str(e)}")
+        return False
 
-# 渲染侧边栏
+# 渲染侧边栏 - 修复版本
 def render_sidebar():
     with st.sidebar:
         st.markdown("""
@@ -302,23 +388,31 @@ def render_sidebar():
         # 快速导航
         st.markdown("### 🧭 快速导航")
         
-        # 修复导航按钮 - 使用正确的页面路径
-        if st.button("🏠 返回首页", use_container_width=True):
+        if st.button("🏠 返回首页", width='stretch'):
             st.switch_page("main.py")
-        if st.button("🔬 图像处理实验室", use_container_width=True):
+        if st.button("🔬 图像处理实验室", width='stretch'):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("📚 学习资源中心", use_container_width=True):
+        if st.button("📤 实验作业提交", width='stretch'):
+            st.switch_page("pages/实验作业提交.py")            
+        if st.button("📚 学习资源中心", width='stretch'):
             st.switch_page("pages/2_📚_学习资源中心.py")
-        if st.button("📝 我的思政足迹", use_container_width=True):
+        if st.button("📝 我的思政足迹", width='stretch'):
             st.switch_page("pages/3_📝_我的思政足迹.py")
-        if st.button("🏆 成果展示", use_container_width=True):
+        if st.button("🏆 成果展示", width='stretch'):
             st.switch_page("pages/4_🏆_成果展示.py")
+        
+        # 用户提交记录查看
+        if "logged_in" in st.session_state and st.session_state.logged_in:
+            st.markdown("---")
+            if st.button("📋 我的提交记录", width='stretch'):
+                st.session_state.show_my_projects = True
+                st.rerun()
         
         # 检查是否为教师，显示管理员入口
         if "logged_in" in st.session_state and st.session_state.logged_in:
             if verify_teacher_role(st.session_state.username):
                 st.markdown("---")
-                if st.button("🔧 进入教师后台", use_container_width=True, type="primary"):
+                if st.button("🔧 进入教师后台", width='stretch', type="primary"):
                     st.session_state.show_admin = True
                     st.rerun()
         
@@ -351,7 +445,7 @@ def render_sidebar():
         ]
         
         for topic in theory_topics:
-            if st.button(f"📖 {topic}", key=f"theory_{topic}", use_container_width=True):
+            if st.button(f"📖 {topic}", key=f"theory_{topic}", width='stretch'):
                 st.info(f"开始学习：{topic}")
         
         st.markdown("---")
@@ -432,6 +526,18 @@ def verify_teacher_role(username):
     except:
         return False
 
+def get_user_id(username):
+    """获取用户ID"""
+    try:
+        conn = sqlite3.connect('image_processing_platform.db')
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username = ?", (username,))
+        result = c.fetchone()
+        conn.close()
+        return result[0] if result else None
+    except:
+        return None
+
 def get_feedback_data():
     """从数据库读取意见反馈数据"""
     try:
@@ -449,7 +555,7 @@ def get_feedback_data():
             feedback_list.append({
                 "序号": row[0],
                 "反馈内容": row[1],
-                "提交时间": row[2],
+                "提交时间": format_beijing_time(row[2]),
                 "IP地址": row[3] if row[3] else "未知",
                 "用户代理": row[4] if row[4] else "未知"
             })
@@ -493,18 +599,59 @@ def save_feedback_to_db(feedback_content):
         st.error(f"保存反馈失败：{str(e)}")
         return False
 
-def save_submitted_project(project_data):
+def save_uploaded_files(uploaded_files, project_name, author_name):
+    """保存上传的文件到服务器"""
+    try:
+        # 创建上传目录
+        upload_dir = "uploads"
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        
+        # 创建项目目录
+        project_dir = os.path.join(upload_dir, f"{project_name}_{author_name}")
+        if not os.path.exists(project_dir):
+            os.makedirs(project_dir)
+        
+        saved_files = []
+        file_paths = []
+        
+        for uploaded_file in uploaded_files:
+            # 生成唯一文件名
+            file_ext = os.path.splitext(uploaded_file.name)[1]
+            unique_filename = f"{get_beijing_time().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
+            file_path = os.path.join(project_dir, unique_filename)
+            
+            # 保存文件
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            saved_files.append(uploaded_file.name)
+            file_paths.append(file_path)
+        
+        return saved_files, file_paths
+    except Exception as e:
+        st.error(f"保存文件失败：{str(e)}")
+        return [], []
+
+def save_submitted_project(project_data, uploaded_files=None):
     """保存提交的作品到数据库"""
     try:
         conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
+        # 获取用户ID
+        user_id = None
+        if "logged_in" in st.session_state and st.session_state.logged_in:
+            user_id = get_user_id(st.session_state.username)
+        
         files_str = json.dumps(project_data.get('files', []))
+        file_paths_str = json.dumps(project_data.get('file_paths', []))
+        
         c.execute('''
-            INSERT INTO submitted_projects (project_name, author_name, project_desc, files)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO submitted_projects (project_name, author_name, project_desc, files, file_paths, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (project_data['project_name'], project_data['author_name'], 
-              project_data['project_desc'], files_str))
+              project_data['project_desc'], files_str, file_paths_str, user_id))
         
         conn.commit()
         conn.close()
@@ -513,33 +660,46 @@ def save_submitted_project(project_data):
         st.error(f"保存作品失败：{str(e)}")
         return False
 
-def get_submitted_projects():
+def get_submitted_projects(user_id=None):
     """获取所有提交的作品"""
     try:
         conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
-        c.execute('''
-            SELECT id, project_name, author_name, project_desc, 
-                   submit_time, files, status, review_notes, review_time, reviewer
-            FROM submitted_projects
-            ORDER BY submit_time DESC
-        ''')
+        if user_id:
+            # 获取特定用户的作品
+            c.execute('''
+                SELECT id, project_name, author_name, project_desc, 
+                       submit_time, files, file_paths, status, review_notes, review_time, reviewer
+                FROM submitted_projects
+                WHERE user_id = ?
+                ORDER BY submit_time DESC
+            ''', (user_id,))
+        else:
+            # 获取所有作品
+            c.execute('''
+                SELECT id, project_name, author_name, project_desc, 
+                       submit_time, files, file_paths, status, review_notes, review_time, reviewer
+                FROM submitted_projects
+                ORDER BY submit_time DESC
+            ''')
         
         projects = []
         for row in c.fetchall():
             files = json.loads(row[5]) if row[5] else []
+            file_paths = json.loads(row[6]) if row[6] else []
             projects.append({
                 "id": row[0],
                 "project_name": row[1],
                 "author_name": row[2],
                 "project_desc": row[3],
-                "submit_time": row[4],
+                "submit_time": format_beijing_time(row[4]),
                 "files": files,
-                "status": row[6],
-                "review_notes": row[7],
-                "review_time": row[8],
-                "reviewer": row[9]
+                "file_paths": file_paths,
+                "status": row[7],
+                "review_notes": row[8],
+                "review_time": format_beijing_time(row[9]),
+                "reviewer": row[10]
             })
         
         conn.close()
@@ -567,6 +727,173 @@ def update_project_status(project_id, status, review_notes=""):
         st.error(f"更新作品状态失败：{str(e)}")
         return False
 
+def download_project_files(project):
+    """下载项目文件 - 增强版本，确保用户可下载自己的文件"""
+    try:
+        if not project.get('file_paths'):
+            return None
+        
+        # 创建临时目录
+        temp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(temp_dir, f"{project['project_name']}_files.zip")
+        
+        # 创建ZIP文件
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for i, file_path in enumerate(project['file_paths']):
+                if os.path.exists(file_path):
+                    # 使用原始文件名
+                    original_filename = project['files'][i] if i < len(project['files']) else f"file_{i+1}"
+                    zipf.write(file_path, original_filename)
+        
+        # 读取ZIP文件内容
+        with open(zip_path, 'rb') as f:
+            zip_data = f.read()
+        
+        # 清理临时文件
+        shutil.rmtree(temp_dir)
+        
+        return zip_data
+    except Exception as e:
+        st.error(f"下载文件失败：{str(e)}")
+        return None
+
+def render_my_projects():
+    """渲染用户提交记录 - 增强下载功能"""
+    st.markdown("<h1 style='color:#dc2626; font-size:2rem;'>📋 我的提交记录</h1>", unsafe_allow_html=True)
+    
+    if "logged_in" not in st.session_state or not st.session_state.logged_in:
+        st.error("🔒 请先登录查看提交记录")
+        return
+    
+    # 返回按钮
+    if st.button("← 返回成果展示", width='content'):
+        st.session_state.show_my_projects = False
+        st.rerun()
+    
+    # 获取用户ID
+    user_id = get_user_id(st.session_state.username)
+    if not user_id:
+        st.error("无法获取用户信息")
+        return
+    
+    # 获取用户提交的作品
+    my_projects = get_submitted_projects(user_id)
+    
+    if my_projects:
+        st.markdown(f"### 📊 提交统计：共提交了 {len(my_projects)} 个作品")
+        
+        # 统计不同状态的作品数量
+        status_counts = {}
+        for project in my_projects:
+            status = project['status']
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        # 显示状态统计
+        cols = st.columns(3)
+        status_labels = {
+            "待审核": ("⏳", "orange"),
+            "已通过": ("✅", "green"),
+            "已拒绝": ("❌", "red")
+        }
+        
+        for idx, (status, count) in enumerate(status_counts.items()):
+            with cols[idx % 3]:
+                icon, color = status_labels.get(status, ("📌", "blue"))
+                st.metric(f"{icon} {status}", count)
+        
+        st.divider()
+        
+        # 显示作品列表
+        for project in my_projects:
+            with st.expander(f"📄 {project['project_name']} - 提交时间：{project['submit_time']}"):
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.markdown(f"**作者：** {project['author_name']}")
+                    st.markdown(f"**作品描述：**")
+                    st.info(project['project_desc'])
+                    
+                    if project['files']:
+                        st.markdown(f"**上传文件：**")
+                        for file in project['files']:
+                            st.markdown(f"- 📎 {file}")
+                
+                with col2:
+                    # 显示状态
+                    status_color = ""
+                    if project['status'] == "待审核":
+                        status_color = "orange"
+                        st.markdown(f"**审核状态：** :{status_color}[{project['status']}]")
+                        st.info("您的作品正在等待老师审核，请耐心等待~")
+                    elif project['status'] == "已通过":
+                        status_color = "green"
+                        st.markdown(f"**审核状态：** :{status_color}[{project['status']}]")
+                        st.success("🎉 恭喜！您的作品已通过审核！")
+                    else:
+                        status_color = "red"
+                        st.markdown(f"**审核状态：** :{status_color}[{project['status']}]")
+                        st.warning("您的作品未通过审核")
+                    
+                    # 显示审核意见
+                    if project['review_notes']:
+                        st.markdown(f"**审核意见：**")
+                        st.warning(project['review_notes'])
+                    
+                    if project['review_time']:
+                        st.markdown(f"**审核时间：** {project['review_time']}")
+                    
+                    if project['reviewer']:
+                        st.markdown(f"**审核老师：** {project['reviewer']}")
+                
+                # 下载按钮 - 无论状态如何，用户都可以下载自己提交的文件
+                if project['files'] and project.get('file_paths'):
+                    zip_data = download_project_files(project)
+                    if zip_data:
+                        st.download_button(
+                            label="📥 下载我的作品文件",
+                            data=zip_data,
+                            file_name=f"{project['project_name']}_作品文件.zip",
+                            mime="application/zip",
+                            key=f"download_{project['id']}"
+                        )
+                        st.info("💡 您可以随时下载您提交的文件")
+    else:
+        st.info("📭 您还没有提交过作品，快去【作品征集】页面提交您的第一个作品吧！")
+
+def export_feedback_to_csv(feedback_data):
+    """导出反馈数据到CSV - 修复编码问题"""
+    try:
+        if not feedback_data:
+            return None
+        
+        # 创建StringIO对象
+        output = io.StringIO()
+        
+        # 定义CSV字段
+        fieldnames = ["序号", "反馈内容", "提交时间", "IP地址", "用户代理"]
+        
+        # 创建CSV writer，确保正确处理中文
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        
+        # 写入表头
+        writer.writeheader()
+        
+        # 写入数据
+        for feedback in feedback_data:
+            writer.writerow(feedback)
+        
+        # 获取CSV字符串并编码为GB18030（兼容GBK和UTF-8）
+        csv_str = output.getvalue()
+        output.close()
+        
+        # 编码为GB18030，确保中文正确显示
+        csv_bytes = csv_str.encode('gb18030', errors='ignore')
+        
+        return csv_bytes
+    except Exception as e:
+        st.error(f"导出CSV失败：{str(e)}")
+        return None
+
 def render_admin_dashboard():
     """渲染管理员后台内容"""
     # 页面标题与用户信息
@@ -575,7 +902,7 @@ def render_admin_dashboard():
     st.markdown("---")
     
     # 返回普通视图按钮
-    if st.button("← 返回成果展示"):
+    if st.button("← 返回成果展示", width='content'):
         st.session_state.show_admin = False
         st.rerun()
     
@@ -637,7 +964,21 @@ def render_admin_dashboard():
                         st.info(project['project_desc'])
                         
                         if project['files']:
-                            st.markdown(f"**上传文件：** {', '.join(project['files'])}")
+                            st.markdown(f"**上传文件：**")
+                            for file in project['files']:
+                                st.markdown(f"- 📎 {file}")
+                            
+                            # 管理员下载按钮
+                            if project.get('file_paths'):
+                                zip_data = download_project_files(project)
+                                if zip_data:
+                                    st.download_button(
+                                        label="📥 下载作品文件",
+                                        data=zip_data,
+                                        file_name=f"{project['project_name']}_作品文件.zip",
+                                        mime="application/zip",
+                                        key=f"admin_download_{project['id']}"
+                                    )
                     
                     with col2:
                         # 显示状态标签
@@ -675,34 +1016,52 @@ def render_admin_dashboard():
         else:
             st.info("📭 暂无学生提交的作品")
     
-    # 2. 意见反馈标签页
+    # 2. 意见反馈标签页 - 修复导出编码问题
     with admin_tabs[1]:
         st.markdown("<h2 style='color:#dc2626;'>💬 意见反馈管理</h2>", unsafe_allow_html=True)
         feedback_data = get_feedback_data()
 
         if feedback_data:
+            # 显示反馈数据表格
             feedback_df = pd.DataFrame(feedback_data)
             st.dataframe(
                 feedback_df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "序号": st.column_config.NumberColumn("序号", width="small"),
-                    "提交时间": st.column_config.DatetimeColumn("提交时间", width="medium"),
+                    "提交时间": st.column_config.DatetimeColumn("提交时间", width="medium", format="YYYY-MM-DD HH:mm:ss"),
                     "反馈内容": st.column_config.TextColumn("反馈内容", width="large"),
                     "IP地址": st.column_config.TextColumn("IP地址", width="medium"),
                     "用户代理": st.column_config.TextColumn("用户代理", width="large")
                 }
             )
 
-            # 导出反馈数据
-            csv = feedback_df.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button(
-                label="📥 导出反馈数据（CSV）",
-                data=csv,
-                file_name=f"意见反馈_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
+            # 导出反馈数据 - 使用修复的编码函数
+            csv_bytes = export_feedback_to_csv(feedback_data)
+            if csv_bytes:
+                st.download_button(
+                    label="📥 导出反馈数据（CSV-GB18030编码）",
+                    data=csv_bytes,
+                    file_name=f"意见反馈_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+            
+            # 显示反馈统计
+            st.divider()
+            st.markdown("#### 📊 反馈统计")
+            total_feedback = len(feedback_data)
+            if total_feedback > 0:
+                avg_length = sum(len(f["反馈内容"]) for f in feedback_data) / total_feedback
+                latest_feedback = feedback_data[0]["提交时间"] if feedback_data else "暂无"
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("总反馈数量", total_feedback)
+                with col2:
+                    st.metric("平均字数", f"{avg_length:.0f}字")
+                with col3:
+                    st.metric("最新反馈", latest_feedback[:10])
         else:
             st.info("📭 暂无用户提交的意见反馈")
     
@@ -730,8 +1089,8 @@ def render_admin_dashboard():
             rejected_projects = len([p for p in submitted_projects if p['status'] == '已拒绝'])
             
             # 反馈统计
-            c.execute("SELECT COUNT(*) FROM feedback")
-            total_feedback = c.fetchone()[0]
+            feedback_data = get_feedback_data()
+            total_feedback = len(feedback_data)
             
             conn.close()
 
@@ -759,6 +1118,38 @@ def render_admin_dashboard():
                 rejection_rate = (rejected_projects / total_projects * 100) if total_projects > 0 else 0
                 st.metric("❌ 拒绝率", f"{rejection_rate:.1f}%")
             
+            # 作品提交时间线
+            if submitted_projects:
+                st.divider()
+                st.markdown("#### 📈 作品提交时间分布")
+                
+                # 提取月份信息
+                month_counts = {}
+                for project in submitted_projects:
+                    if project['submit_time']:
+                        month = project['submit_time'][:7]  # 取YYYY-MM
+                        month_counts[month] = month_counts.get(month, 0) + 1
+                
+                if month_counts:
+                    months = list(month_counts.keys())
+                    counts = list(month_counts.values())
+                    
+                    timeline_df = pd.DataFrame({
+                        '月份': months,
+                        '作品数量': counts
+                    }).sort_values('月份')
+                    
+                    fig_timeline = px.line(
+                        timeline_df,
+                        x='月份',
+                        y='作品数量',
+                        title='作品提交趋势',
+                        markers=True,
+                        line_shape='spline'
+                    )
+                    fig_timeline.update_traces(line_color='#dc2626', line_width=3)
+                    st.plotly_chart(fig_timeline, width='stretch')
+            
             st.divider()
             
             # 显示反馈统计
@@ -767,8 +1158,18 @@ def render_admin_dashboard():
             with col1:
                 st.metric("总反馈数量", total_feedback)
             with col2:
-                avg_feedback_len = sum(len(f['反馈内容']) for f in get_feedback_data()) / max(total_feedback, 1)
-                st.metric("平均反馈长度", f"{avg_feedback_len:.0f}字")
+                if total_feedback > 0:
+                    avg_feedback_len = sum(len(f['反馈内容']) for f in feedback_data) / total_feedback
+                    st.metric("平均反馈长度", f"{avg_feedback_len:.0f}字")
+                else:
+                    st.metric("平均反馈长度", "0字")
+            
+            # 显示平台运行时间
+            st.divider()
+            st.markdown("#### 🕒 平台运行信息")
+            current_time = get_beijing_time()
+            st.markdown(f"**当前服务器时间：** {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            st.markdown(f"**时区：** 北京时间 (UTC+8)")
                 
         except Exception as e:
             st.error(f"统计数据加载失败：{str(e)}")
@@ -786,13 +1187,13 @@ def render_main_content():
     # 总体统计
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("🎯 优秀作品", "156个", "+28个")
+        st.metric("🎯 优秀作品", "3个", "+1个")
     with col2:
-        st.metric("🏅 获得奖项", "86项", "+15项")
+        st.metric("🏅 获得奖项", "120项", "+1项")
     with col3:
-        st.metric("💡 技术创新", "245项", "+42项")
+        st.metric("💡 技术创新", "8项", "+42项")
     with col4:
-        st.metric("🌟 思政融合", "100%", "深度融合")
+        st.metric("🌟 思政融合", "98%", "深度融合")
     
     # 使用标签页组织内容
     tab1, tab2, tab3, tab4 = st.tabs(["🎨 优秀作品", "📊 成果分析", "💡 作品征集", "💬 意见反馈"])
@@ -883,7 +1284,7 @@ def render_main_content():
                 title="📈 思政元素分布",
                 color_discrete_sequence=px.colors.sequential.Reds
             )
-            st.plotly_chart(fig1, use_container_width=True)
+            st.plotly_chart(fig1, width='stretch')
         
         with col_b:
             fig2 = px.bar(
@@ -894,7 +1295,7 @@ def render_main_content():
                 color="数量",
                 color_continuous_scale="Reds"
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
         
         # 获奖赛事统计
         st.markdown("<h3 style='color:#dc2626; margin-top: 30px;'>🏅 代表性赛事获奖情况</h3>", unsafe_allow_html=True)
@@ -937,6 +1338,11 @@ def render_main_content():
         📢 **征集说明：**
         欢迎提交您的思政与技术融合作品，优秀作品将纳入展示平台。
         作品要求体现技术创新的同时，融入思政元素，展现新时代大学生的责任与担当。
+        
+        📋 **提交后您可以：**
+        1. 在侧边栏点击【我的提交记录】查看审核状态
+        2. 无论审核状态如何，您都可以下载自己提交的文件
+        3. 查看老师的审核意见
         """)
         
         with st.form("project_submit_form"):
@@ -951,37 +1357,41 @@ def render_main_content():
                                       height=150)
             
             uploaded_files = st.file_uploader(
-                "📎 上传相关文件（代码/文档/PPT等）",
+                "📎 上传相关文件（代码/文档/PPT/图片/视频等）",
                 accept_multiple_files=True,
-                type=["zip", "rar", "pdf", "doc", "docx", "pptx", "jpg", "png", "mp4"],
-                help="支持多种格式文件，单个文件大小建议不超过20MB"
+                type=["zip", "rar", "pdf", "doc", "docx", "pptx", "jpg", "jpeg", "png", "gif", "mp4", "avi", "mov"],
+                help="支持多种格式文件，建议单个文件不超过20MB"
             )
             
             submitted = st.form_submit_button("🚀 提交作品", type="primary")
             
             if submitted:
                 if project_name and author_name and project_desc:
-                    # 保存上传的文件名
-                    file_names = []
+                    # 保存上传的文件
+                    saved_files = []
+                    file_paths = []
                     if uploaded_files:
-                        for file in uploaded_files:
-                            # 这里可以添加保存文件的逻辑
-                            file_names.append(file.name)
+                        saved_files, file_paths = save_uploaded_files(uploaded_files, project_name, author_name)
                     
                     # 构建作品数据
                     project_data = {
                         "project_name": project_name,
                         "author_name": author_name,
                         "project_desc": project_desc,
-                        "files": file_names
+                        "files": saved_files,
+                        "file_paths": file_paths
                     }
                     
                     # 保存到数据库
-                    if save_submitted_project(project_data):
-                        if file_names:
-                            st.success(f"✅ 作品提交成功！已上传文件：{', '.join(file_names)}")
+                    if save_submitted_project(project_data, uploaded_files):
+                        if saved_files:
+                            st.success(f"✅ 作品提交成功！已上传 {len(saved_files)} 个文件")
+                            for file in saved_files:
+                                st.markdown(f"- 📎 {file}")
                         else:
                             st.success("✅ 作品提交成功！我们将尽快审核~")
+                        
+                        st.info("💡 您可以在侧边栏点击【我的提交记录】查看审核状态和下载您提交的文件")
                         st.balloons()
                     else:
                         st.error("❌ 作品提交失败，请稍后重试")
@@ -1029,6 +1439,8 @@ def main():
     # 初始化session状态
     if "show_admin" not in st.session_state:
         st.session_state.show_admin = False
+    if "show_my_projects" not in st.session_state:
+        st.session_state.show_my_projects = False
     
     # 渲染侧边栏
     render_sidebar()
@@ -1047,6 +1459,9 @@ def main():
             st.error("🔒 您尚未登录，请先登录！")
             st.session_state.show_admin = False
             st.rerun()
+    elif st.session_state.show_my_projects:
+        # 显示用户提交记录
+        render_my_projects()
     else:
         # 显示正常的成果展示内容
         render_main_content()

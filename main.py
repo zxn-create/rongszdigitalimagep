@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import sqlite3
 import bcrypt
 import time
+
 # 页面配置
 st.set_page_config(
     page_title="融思政 - 数字图像处理实验平台",
@@ -125,9 +126,9 @@ def add_user(username, password, role):
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
         create_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        c.execute( 
+        c.execute(
             "INSERT INTO users (username, password, role, create_time) VALUES (?, ?, ?, ?)", 
-            (username, hashed_password.decode('utf-8'), role, create_time) 
+            (username, hashed_password.decode('utf-8'), role, create_time)
         )
         conn.commit()
         conn.close()
@@ -349,6 +350,11 @@ def apply_modern_css():
     .modern-nav-card.achievement {
         background: linear-gradient(135deg, #fff, var(--beige-light));
         border-top: 4px solid var(--dark-red);
+    }
+    
+    .modern-nav-card.submission {
+        background: linear-gradient(135deg, #fff, var(--beige-light));
+        border-top: 4px solid #10b981;
     }
     
     .nav-icon {
@@ -877,10 +883,13 @@ def render_sidebar():
             st.switch_page("main.py")
         if st.button("🔬 图像处理实验室", use_container_width=True):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
+        if st.button("📤 实验作业提交", use_container_width=True):
+            st.switch_page("pages/实验作业提交.py")
         if st.button("📚 学习资源中心", use_container_width=True):
             st.switch_page("pages/2_📚_学习资源中心.py")
         if st.button("📝 我的思政足迹", use_container_width=True):
             st.switch_page("pages/3_📝_我的思政足迹.py")
+
         if st.button("🏆 成果展示", use_container_width=True):
             st.switch_page("pages/4_🏆_成果展示.py")
         
@@ -895,6 +904,7 @@ def render_sidebar():
                 <li style='color: #dc2626;'>🇨🇳 思政教育融合</li>
                 <li style='color: #dc2626;'>💡 创新实践平台</li>
                 <li style='color: #dc2626;'>🚀 现代化技术栈</li>
+                <li style='color: #dc2626;'>📤 作业提交系统</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -911,6 +921,7 @@ def render_sidebar():
                 <li style='color: #dc2626;'>🔬 科学态度</li>
                 <li style='color: #dc2626;'>💡 创新意识</li>
                 <li style='color: #dc2626;'>🇨🇳 家国情怀</li>
+                <li style='color: #dc2626;'>📚 自主学习能力</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -1129,6 +1140,85 @@ def render_login_dialog():
                             st.warning("⚠️ 请输入完整的注册信息")
             
             st.markdown("</div>", unsafe_allow_html=True)
+def get_experiment_stats():
+    """获取实验作业统计数据（仅教师端使用）"""
+    try:
+        conn = sqlite3.connect('image_processing_platform.db')
+        c = conn.cursor()
+        
+        # 获取总提交数
+        c.execute("SELECT COUNT(*) FROM experiment_submissions")
+        total_submissions = c.fetchone()[0]
+        
+        # 获取待批改数（status为'pending'）
+        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE status = 'pending'")
+        pending_count = c.fetchone()[0]
+        
+        # 获取已评分数（status为'graded'）
+        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE status = 'graded'")
+        graded_count = c.fetchone()[0]
+        
+        # 获取平均分
+        c.execute("SELECT AVG(score) FROM experiment_submissions WHERE score > 0")
+        avg_score_result = c.fetchone()[0]
+        avg_score = round(avg_score_result, 1) if avg_score_result else 0
+        
+        conn.close()
+        
+        return {
+            'total_submissions': total_submissions,
+            'pending_count': pending_count,
+            'graded_count': graded_count,
+            'avg_score': avg_score
+        }
+    except Exception as e:
+        print(f"获取作业统计数据失败: {str(e)}")
+        return {
+            'total_submissions': 0,
+            'pending_count': 0,
+            'graded_count': 0,
+            'avg_score': 0
+        }
+
+def get_submission_by_username(username):
+    """获取指定用户的提交情况"""
+    try:
+        conn = sqlite3.connect('image_processing_platform.db')
+        c = conn.cursor()
+        
+        # 获取用户提交总数
+        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE student_username = ?", (username,))
+        user_total = c.fetchone()[0]
+        
+        # 获取用户已评分数
+        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE student_username = ? AND status = 'graded'", (username,))
+        user_graded = c.fetchone()[0]
+        
+        # 获取用户待批改数
+        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE student_username = ? AND status = 'pending'", (username,))
+        user_pending = c.fetchone()[0]
+        
+        # 获取用户平均分
+        c.execute("SELECT AVG(score) FROM experiment_submissions WHERE student_username = ? AND score > 0", (username,))
+        avg_score_result = c.fetchone()[0]
+        user_avg_score = round(avg_score_result, 1) if avg_score_result else 0
+        
+        conn.close()
+        
+        return {
+            'user_total': user_total,
+            'user_graded': user_graded,
+            'user_pending': user_pending,
+            'user_avg_score': user_avg_score
+        }
+    except Exception as e:
+        print(f"获取用户提交情况失败: {str(e)}")
+        return {
+            'user_total': 0,
+            'user_graded': 0,
+            'user_pending': 0,
+            'user_avg_score': 0
+        }
 
 def main():
     # 初始化session_state
@@ -1177,9 +1267,10 @@ def main():
         st.metric("📚 思政感悟", f"{stats['reflection_count']}", "实时更新")
     with col4:
         st.metric("🏆 优秀作品", "67", "+15%")    
-    # 两栏主要内容
+    
+    # 三栏主要内容（调整为三栏以容纳实验作业提交模块）
     st.markdown("## 🚀 核心功能模块")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         # 图像处理实验室
@@ -1243,6 +1334,68 @@ def main():
             else:
                 st.warning("请先登录")
     
+    with col3:
+        # 新增：实验作业提交
+        st.markdown("""
+        <div class='modern-nav-card submission'>
+            <div class='nav-icon'>📤</div>
+            <h3>实验作业提交</h3>
+            <p>提交实验作业和报告<br>获取教师反馈与评分</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("提交作业", key="submission_btn", use_container_width=True):
+            if st.session_state.logged_in:
+                st.switch_page("pages/实验作业提交.py")
+            else:
+                st.warning("请先登录")
+        
+        # 根据用户角色显示不同的作业状态信息
+        if st.session_state.logged_in:
+            if st.session_state.role == "teacher":
+                # 教师端：显示全局作业状态
+                teacher_stats = get_experiment_stats()
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, #f0fdf4, #dcfce7); 
+                            padding: 25px; border-radius: 15px; margin-top: 20px;
+                            border: 2px solid #10b981;'>
+                    <h4 style='color: #10b981; text-align: center;'>📊 教师工作台</h4>
+                    <p style='color: #065f46; text-align: center; font-size: 0.9rem;'>
+                    📋 总提交: {total_submissions} 份<br>
+                    ⏳ 待批改: {pending_count} 份<br>
+                    ✅ 已批改: {graded_count} 份<br>
+                    ⭐ 平均分: {avg_score} 分
+                    </p>
+                </div>
+                """.format(
+                    total_submissions=teacher_stats['total_submissions'],
+                    pending_count=teacher_stats['pending_count'],
+                    graded_count=teacher_stats['graded_count'],
+                    avg_score=teacher_stats['avg_score']
+                ), unsafe_allow_html=True)
+                
+            elif st.session_state.role == "student":
+                # 学生端：显示个人作业状态
+                student_stats = get_submission_by_username(st.session_state.username)
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, #f0fdf4, #dcfce7); 
+                            padding: 25px; border-radius: 15px; margin-top: 20px;
+                            border: 2px solid #10b981;'>
+                    <h4 style='color: #10b981; text-align: center;'>📊 我的作业</h4>
+                    <p style='color: #065f46; text-align: center; font-size: 0.9rem;'>
+                    📤 已提交: {user_total} 份<br>
+                    ⏳ 待批改: {user_pending} 份<br>
+                    ✅ 已批改: {user_graded} 份<br>
+                    ⭐ 平均分: {user_avg_score} 分
+                    </p>
+                </div>
+                """.format(
+                    user_total=student_stats['user_total'],
+                    user_pending=student_stats['user_pending'],
+                    user_graded=student_stats['user_graded'],
+                    user_avg_score=student_stats['user_avg_score']
+                ), unsafe_allow_html=True)
+    
     # 思政资源长廊
     st.markdown("---")
     st.markdown("<h2 style='text-align: center; color: #8B0000; margin-bottom: 40px; font-family: SimSun, serif;'>🇨🇳 思政资源长廊</h2>", unsafe_allow_html=True)
@@ -1276,10 +1429,7 @@ def main():
         '>—— 钱学森</div>
     </div>
     """, unsafe_allow_html=True)
-    # 科学家卡片网格 - 横向滚动版
-
-
-
+    
     # 第一行科学家
     st.markdown('<div class="modern-scientists-container">', unsafe_allow_html=True)
     st.markdown('<div class="modern-scientists-row">', unsafe_allow_html=True)
@@ -1391,11 +1541,12 @@ def main():
         """, unsafe_allow_html=True)
 
     st.markdown('</div></div>', unsafe_allow_html=True)
+    
     # 新增：平台特色功能展示
     st.markdown("---")
     st.markdown("<h2 style='text-align: center; color: #8B0000; margin-bottom: 40px; font-family: SimSun, serif;'>✨ 平台特色功能</h2>", unsafe_allow_html=True)
     
-    feature_col1, feature_col2, feature_col3 = st.columns(3)
+    feature_col1, feature_col2, feature_col3, feature_col4 = st.columns(4)
     
     with feature_col1:
         st.markdown("""
@@ -1421,6 +1572,15 @@ def main():
             <div style='font-size: 3rem; margin-bottom: 15px;'>📊</div>
             <h4 style='color: #dc2626;'>学习数据分析</h4>
             <p style='color: #6b7280;'>实时追踪学习进度，个性化推荐资源，助力高效学习成长</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with feature_col4:
+        st.markdown("""
+        <div style='text-align: center; padding: 20px;'>
+            <div style='font-size: 3rem; margin-bottom: 15px;'>📤</div>
+            <h4 style='color: #dc2626;'>智能作业系统</h4>
+            <p style='color: #6b7280;'>在线提交作业，及时获取反馈，提升学习效果与教学质量</p>
         </div>
         """, unsafe_allow_html=True)
 
