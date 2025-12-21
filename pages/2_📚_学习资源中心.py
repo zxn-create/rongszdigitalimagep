@@ -664,8 +664,6 @@ def render_sidebar():
             st.switch_page("main.py")
         if st.button("🔬 图像处理实验室", use_container_width=True):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("🏫加入班级与在线签到", use_container_width=True):
-            st.switch_page("pages/分班和在线签到.py")
         if st.button("📤 实验作业提交", use_container_width=True):
             st.switch_page("pages/实验作业提交.py")
         if st.button("📚 学习资源中心", use_container_width=True):
@@ -1572,23 +1570,38 @@ def render_student_project_interface(projects):
             student_codes.sort(key=lambda x: x['upload_time'], reverse=True)
             
             for code in student_codes:
-                st.markdown(f"""
-                <div class='file-card'>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <h5 style="margin: 0; color: #1f2937;">📝 {code['original_name']}</h5>
-                            <p style="color: #6b7280; margin: 5px 0; font-size: 0.9rem;">
-                                <strong>所属项目:</strong> {code['project_name']}
-                            </p>
-                            <p style="color: #6b7280; margin: 5px 0; font-size: 0.9rem;">
-                                <strong>上传时间:</strong> {code['upload_time']} | <strong>文件大小:</strong> {code['size']}
-                            </p>
-                            {f'<p style="color: #4b5563; margin: 5px 0; font-size: 0.9rem;"><strong>说明:</strong> {code["description"]}</p>' if code.get('description') else ''}
-                        </div>
-                    </div>
-                </div>
+                # 在页面开头添加自定义CSS
+                st.markdown("""
+                    <style>
+                    .file-card {
+                        padding: 15px;
+                        border-radius: 10px;
+                        border: 1px solid #e5e7eb;
+                        margin: 10px 0;
+                        background-color: white;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                        }
+                    .file-card h5 {
+                       margin: 0 0 10px 0;
+                        color: #1f2937;
+                    }
+                    .file-card p {
+                        margin: 5px 0;
+                        color: #6b7280;
+                        font-size: 0.9rem;
+    }
+                    </style>
                 """, unsafe_allow_html=True)
-                
+
+                # 然后在需要的地方
+                st.markdown(f"""
+                    <div class='file-card'>
+                        <h5>📝 {code['original_name']}</h5>
+                        <p><strong>所属项目:</strong> {code['project_name']}</p>
+                        <p><strong>上传时间:</strong> {code['upload_time']} | <strong>文件大小:</strong> {code['size']}</p>
+                        {f'<p><strong>说明:</strong> {code["description"]}</p>' if code.get('description') else ''}
+                    </div>
+                """, unsafe_allow_html=True)
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
@@ -2800,7 +2813,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-
         code_resources = [
             {"name": "图像处理算法库（Python）", "language": "Python", "size": "4.2MB", "url": "https://github.com/search?q=OpenCV"},
             {"name": "OpenCV实战项目", "language": "C++/Python", "size": "7.8MB", "url": "https://github.com/search?q=OpenCV"},
@@ -2815,7 +2827,6 @@ def main():
                 with col_b:
                     st.caption(f"语言: {code['language']}")
                 with col_c:
-                    # 修改为HTML链接方式
                     button_html = create_link_button(code['url'], "下载")
                     st.markdown(button_html, unsafe_allow_html=True)
 
