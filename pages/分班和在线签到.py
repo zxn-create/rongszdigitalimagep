@@ -1620,45 +1620,117 @@ def render_teacher_dashboard():
     """, unsafe_allow_html=True)
     
     username = st.session_state.username
-    
+
+
+
+
+
+    # ============ 修改这里：获取真实的统计数据 ============
+    try:
+        conn = sqlite3.connect('image_processing_platform.db')
+        c = conn.cursor()
+        
+        # 1. 获取班级数量
+        c.execute("""
+            SELECT COUNT(*) FROM classrooms 
+            WHERE teacher_username = ? AND is_active = TRUE
+        """, (username,))
+        total_classes = c.fetchone()[0] or 0
+        
+        # 2. 获取总学生数
+        c.execute("""
+            SELECT COUNT(DISTINCT cm.student_username) 
+            FROM classrooms c
+            JOIN classroom_members cm ON c.class_code = cm.class_code
+            WHERE c.teacher_username = ? 
+            AND c.is_active = TRUE
+            AND cm.role = 'student'
+            AND cm.status = 'active'
+        """, (username,))
+        total_students = c.fetchone()[0] or 0
+        
+        # 3. 获取签到活动总数
+        c.execute("""
+            SELECT COUNT(*) 
+            FROM attendance_sessions
+            WHERE teacher_username = ?
+        """, (username,))
+        total_sessions = c.fetchone()[0] or 0
+        
+        # 4. 获取平均到课率
+
+        c.execute("""
+            SELECT 
+                session_code,
+                total_students,
+                attended_students
+            FROM attendance_sessions
+            WHERE teacher_username = ?
+            AND status = 'completed'
+            AND total_students > 0
+        """, (username,))
+        
+        sessions = c.fetchall()
+        
+        if sessions:
+            total_attendance_rate = 0
+            valid_sessions = 0
+            
+            for session in sessions:
+                session_code, total_students, attended_students = session
+                if total_students > 0:
+                    rate = (attended_students / total_students) * 100
+                    total_attendance_rate += rate
+                    valid_sessions += 1
+            
+            if valid_sessions > 0:
+                avg_attendance_rate = round(total_attendance_rate / valid_sessions, 1)
+            else:
+                avg_attendance_rate = 0
+        else:
+            avg_attendance_rate = 0        
+        conn.close()
+        
+    except Exception as e:
+        # 如果出错，使用默认值
+        print(f"获取统计数据失败: {str(e)}")
+        total_classes = 0
+        total_students = 0
+        total_sessions = 0
+        avg_attendance_rate = 0    
     # 统计卡片
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3= st.columns(3)
     
+    # 使用f-string或format方法
     with col1:
-        st.markdown("""
+        html1 = f"""
         <div class='stat-card'>
             <div>🏫</div>
-            <div class='stat-number'>0</div>
+            <div class='stat-number'>{total_classes}</div>
             <div class='stat-label'>我的班级</div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+        st.markdown(html1, unsafe_allow_html=True)
     
     with col2:
-        st.markdown("""
+        html2 = f"""
         <div class='stat-card'>
             <div>👥</div>
-            <div class='stat-number'>0</div>
+            <div class='stat-number'>{total_students}</div>
             <div class='stat-label'>总学生数</div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+        st.markdown(html2, unsafe_allow_html=True)
     
     with col3:
-        st.markdown("""
+        html3 = f"""
         <div class='stat-card'>
             <div>📝</div>
-            <div class='stat-number'>0</div>
+            <div class='stat-number'>{total_sessions}</div>
             <div class='stat-label'>签到活动</div>
         </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown("""
-        <div class='stat-card'>
-            <div>📊</div>
-            <div class='stat-number'>0%</div>
-            <div class='stat-label'>平均到课率</div>
-        </div>
-        """, unsafe_allow_html=True)
+        """
+        st.markdown(html3, unsafe_allow_html=True)
     
     # 获取教师班级数据
     teacher_classes = get_teacher_classes(username)
