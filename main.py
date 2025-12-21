@@ -156,6 +156,34 @@ def verify_user(username, password):
         st.error(f"登录验证失败：{str(e)}")
         return False, None
 
+def change_password(username, old_password, new_password):
+    """修改用户密码"""
+    try:
+        # 首先验证旧密码
+        success, role = verify_user(username, old_password)
+        if not success:
+            return False, "旧密码错误"
+        
+        # 更新为新密码
+        conn = sqlite3.connect('image_processing_platform.db')
+        c = conn.cursor()
+        
+        # 对新密码进行哈希处理
+        salt = bcrypt.gensalt()
+        hashed_new_password = bcrypt.hashpw(new_password.encode('utf-8'), salt)
+        
+        # 更新密码
+        c.execute(
+            "UPDATE users SET password = ? WHERE username = ?",
+            (hashed_new_password.decode('utf-8'), username)
+        )
+        
+        conn.commit()
+        conn.close()
+        return True, "密码修改成功！"
+    except Exception as e:
+        return False, f"修改密码失败：{str(e)}"
+
 def get_user_stats():
     """获取用户统计数据"""
     try:
@@ -675,6 +703,16 @@ def apply_modern_css():
         margin: 20px 0;
     }
     
+    /* 修改密码对话框样式 */
+    .change-password-dialog {
+        background: white;
+        padding: 30px;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        border: 2px solid #10b981;
+        margin: 20px 0;
+    }
+    
     /* 角色选择样式 */
     .role-selection {
         display: flex;
@@ -968,13 +1006,13 @@ def render_user_area():
     
     with col3:
         if st.session_state.logged_in:
-            # 已登录状态 - 显示用户信息和退出按钮
+            # 已登录状态 - 显示用户信息和功能按钮
             username = st.session_state.username
             role = st.session_state.role
             avatar_text = username[0].upper() if username else "U"
             
-            # 用户信息显示 - 合理布局
-            col_user1, col_user2, col_user3 = st.columns([1, 2, 1.2])
+            # 用户信息显示
+            col_user1, col_user2 = st.columns([1, 3])
             with col_user1:
                 st.markdown(f"""
                 <div style='
@@ -1012,8 +1050,20 @@ def render_user_area():
                     <div style='color: #6b7280; font-size: 0.75rem; line-height: 1.2;'>{role}</div>
                 </div>
                 """, unsafe_allow_html=True)
-            with col_user3:
-                # 退出登录按钮 - 合理大小
+            
+            # 功能按钮区域
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                # 修改密码按钮
+                if st.button("🔑 改密", 
+                           key="change_pwd_btn", 
+                           help="修改密码", 
+                           use_container_width=True,
+                           type="secondary"):
+                    st.session_state.show_change_password = True
+                    st.rerun()
+            with col_btn2:
+                # 退出登录按钮
                 if st.button("🚪 退出", 
                            key="logout_btn", 
                            help="退出登录", 
@@ -1023,10 +1073,11 @@ def render_user_area():
                     st.session_state.username = ""
                     st.session_state.role = ""
                     st.session_state.show_login = False
+                    st.session_state.show_change_password = False
                     st.rerun()
                 
         else:
-            # 未登录状态 - 显示登录/注册按钮（合理大小）
+            # 未登录状态 - 显示登录/注册按钮
             if st.button("👤 登录/注册", 
                         key="login_btn", 
                         help="登录/注册", 
@@ -1036,6 +1087,81 @@ def render_user_area():
                 st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
+
+def render_change_password_dialog():
+    """渲染修改密码对话框"""
+    if st.session_state.get('show_change_password', False):
+        # 使用容器创建对话框效果
+        with st.container():
+            st.markdown("""
+            <div class='change-password-dialog'>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("### 🔑 修改密码")
+            st.info("为了保护您的账户安全，请定期修改密码。")
+            
+            with st.form("change_password_form", clear_on_submit=True):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    old_password = st.text_input("🔒 当前密码", 
+                                                type="password", 
+                                                placeholder="请输入当前密码",
+                                                key="old_password")
+                
+                with col2:
+                    new_password = st.text_input("🔐 新密码", 
+                                                type="password", 
+                                                placeholder="请输入新密码",
+                                                key="new_password",
+                                                help="建议使用8位以上包含字母、数字和特殊字符的组合")
+                
+                confirm_password = st.text_input("✅ 确认新密码", 
+                                                type="password", 
+                                                placeholder="请再次输入新密码",
+                                                key="confirm_password")
+                
+                col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+                
+                with col_btn1:
+                    submit_btn = st.form_submit_button("💾 确认修改", 
+                                                      use_container_width=True,
+                                                      type="primary")
+                with col_btn2:
+                    if st.form_submit_button("❌ 取消", 
+                                           use_container_width=True,
+                                           type="secondary"):
+                        st.session_state.show_change_password = False
+                        st.rerun()
+                
+                if submit_btn:
+                    if not old_password or not new_password or not confirm_password:
+                        st.error("⚠️ 请填写所有密码字段")
+                    elif new_password != confirm_password:
+                        st.error("❌ 两次输入的新密码不一致")
+                    elif len(new_password) < 6:
+                        st.error("❌ 新密码长度至少6位")
+                    elif old_password == new_password:
+                        st.error("❌ 新密码不能与旧密码相同")
+                    else:
+                        # 调用修改密码函数
+                        success, message = change_password(
+                            st.session_state.username, 
+                            old_password, 
+                            new_password
+                        )
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                            st.balloons()
+                            # 等待2秒后关闭对话框
+                            time.sleep(2)
+                            st.session_state.show_change_password = False
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {message}")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
 
 def render_login_dialog():
     """渲染登录注册对话框"""
@@ -1142,6 +1268,7 @@ def render_login_dialog():
                             st.warning("⚠️ 请输入完整的注册信息")
             
             st.markdown("</div>", unsafe_allow_html=True)
+
 def get_experiment_stats():
     """获取实验作业统计数据（仅教师端使用）"""
     try:
@@ -1234,6 +1361,8 @@ def main():
         st.session_state.show_login = False
     if 'selected_role' not in st.session_state:
         st.session_state.selected_role = "student"
+    if 'show_change_password' not in st.session_state:
+        st.session_state.show_change_password = False
     
     # 应用现代化CSS
     apply_modern_css()
@@ -1248,6 +1377,9 @@ def main():
         <p class='subtitle'>融国家之情怀，思技术之正道，育时代之新人</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # 修改密码对话框（优先显示）
+    render_change_password_dialog()
     
     # 登录注册对话框
     render_login_dialog()

@@ -13,6 +13,8 @@ import json
 import uuid
 import shutil
 from pathlib import Path
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 黑体
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
 # 页面配置
 st.set_page_config(
@@ -428,79 +430,142 @@ def apply_modern_css():
     </style>
     """, unsafe_allow_html=True)
 
-# ================== 重新设计的图像处理工具函数 ==================
+# ================== 优化的图像处理工具函数 ==================
 
-def apply_edge_detection(image, operator):
+def apply_edge_detection(image, operator, params):
     """
-    应用边缘检测算子
+    应用边缘检测算子（优化版）
     Args:
         image: 输入的BGR图像
-        operator: 算子类型（Roberts, Sobel, Prewitt, Laplacian, LoG）
+        operator: 算子类型
+        params: 参数字典
     Returns:
-        edge_image: 边缘检测结果（3通道BGR图像）
+        result_dict: 包含边缘检测结果的字典
     """
     if image is None or image.size == 0:
         raise ValueError("输入图像无效")
     
-    # 转换为灰度图
+    # 转换为灰度图用于处理
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
-    # 根据算子类型进行处理
-    if operator == "Roberts":
-        # Roberts算子
-        kernelx = np.array([[1, 0], [0, -1]], dtype=np.float32)
-        kernely = np.array([[0, 1], [-1, 0]], dtype=np.float32)
-        robertsx = cv2.filter2D(gray, cv2.CV_32F, kernelx)
-        robertsy = cv2.filter2D(gray, cv2.CV_32F, kernely)
-        edge_magnitude = np.sqrt(np.square(robertsx) + np.square(robertsy))
-        edge_magnitude = np.uint8(np.clip(edge_magnitude, 0, 255))
+    result_dict = {'original': image.copy()}
+    threshold = params.get('threshold', 30)
     
-    elif operator == "Sobel":
-        # Sobel算子
-        sobelx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
-        edge_magnitude = np.sqrt(np.square(sobelx) + np.square(sobely))
-        edge_magnitude = np.uint8(np.clip(edge_magnitude, 0, 255))
+    try:
+        if operator == "Roberts":
+            # Roberts算子
+            kernelx = np.array([[1, 0], [0, -1]], dtype=np.float32)
+            kernely = np.array([[0, 1], [-1, 0]], dtype=np.float32)
+            robertsx = cv2.filter2D(gray, cv2.CV_32F, kernelx)
+            robertsy = cv2.filter2D(gray, cv2.CV_32F, kernely)
+            edge_magnitude = np.sqrt(np.square(robertsx) + np.square(robertsy))
+            edges = np.uint8(np.clip(edge_magnitude, 0, 255))
+            result_dict['edges'] = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            result_dict['edges_original'] = edges
+            
+        elif operator == "Sobel":
+            # Sobel算子
+            kernel_size = params.get('kernel_size', 3)
+            scale = params.get('scale', 1)
+            delta = params.get('delta', 0)
+            
+            grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=kernel_size, scale=scale, delta=delta)
+            grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=kernel_size, scale=scale, delta=delta)
+            
+            abs_grad_x = cv2.convertScaleAbs(grad_x)
+            abs_grad_y = cv2.convertScaleAbs(grad_y)
+            edges = cv2.addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0)
+            
+            # 增强边缘效果
+            edges = cv2.convertScaleAbs(edges, alpha=1.5, beta=20)
+            result_dict['edges'] = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            result_dict['edges_original'] = edges
+            result_dict['grad_x'] = grad_x
+            result_dict['grad_y'] = grad_y
+            
+        elif operator == "Prewitt":
+            # Prewitt算子
+            kernelx = np.array([[1, 0, -1], [1, 0, -1], [1, 0, -1]], dtype=np.float32)
+            kernely = np.array([[1, 1, 1], [0, 0, 0], [-1, -1, -1]], dtype=np.float32)
+            prewittx = cv2.filter2D(gray, cv2.CV_32F, kernelx)
+            prewitty = cv2.filter2D(gray, cv2.CV_32F, kernely)
+            edge_magnitude = np.sqrt(np.square(prewittx) + np.square(prewitty))
+            edges = np.uint8(np.clip(edge_magnitude, 0, 255))
+            
+            # 增强效果
+            edges = cv2.convertScaleAbs(edges, alpha=1.3, beta=15)
+            result_dict['edges'] = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            result_dict['edges_original'] = edges
+            
+        elif operator == "Laplacian":
+            # Laplacian算子
+            kernel_size = params.get('kernel_size', 3)
+            laplacian = cv2.Laplacian(gray, cv2.CV_32F, ksize=kernel_size)
+            edges = cv2.convertScaleAbs(laplacian)
+            
+            # 增强效果
+            edges = cv2.convertScaleAbs(edges, alpha=2.0, beta=30)
+            result_dict['edges'] = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            result_dict['edges_original'] = edges
+            
+        elif operator == "LoG":
+            # LoG算子（Laplacian of Gaussian）
+            kernel_size = params.get('log_kernel', 5)
+            sigma = params.get('sigma', 1.0)
+            
+            blurred = cv2.GaussianBlur(gray, (kernel_size, kernel_size), sigma)
+            laplacian = cv2.Laplacian(blurred, cv2.CV_32F, ksize=3)
+            edges = cv2.convertScaleAbs(laplacian)
+            
+            # 增强效果
+            edges = cv2.convertScaleAbs(edges, alpha=1.8, beta=25)
+            result_dict['edges'] = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            result_dict['edges_original'] = edges
+            
+        elif operator == "Canny":
+            # Canny算子
+            threshold1 = params.get('threshold1', 50)
+            threshold2 = params.get('threshold2', 150)
+            blur_kernel = params.get('blur_kernel', 5)
+            
+            blurred = cv2.GaussianBlur(gray, (blur_kernel, blur_kernel), 0)
+            edges = cv2.Canny(blurred, threshold1, threshold2)
+            
+            # 将二值边缘转换为彩色
+            colored_edges = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            # 边缘标记为红色
+            colored_edges[edges > 0] = [0, 0, 255]
+            
+            result_dict['edges'] = colored_edges
+            result_dict['edges_original'] = edges
+            
+        else:
+            # 默认返回原图
+            result_dict['edges'] = image.copy()
+            result_dict['edges_original'] = gray
     
-    elif operator == "Prewitt":
-        # Prewitt算子
-        kernelx = np.array([[1, 1, 1], [0, 0, 0], [-1, -1, -1]], dtype=np.float32)
-        kernely = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], dtype=np.float32)
-        prewittx = cv2.filter2D(gray, cv2.CV_32F, kernelx)
-        prewitty = cv2.filter2D(gray, cv2.CV_32F, kernely)
-        edge_magnitude = np.sqrt(np.square(prewittx) + np.square(prewitty))
-        edge_magnitude = np.uint8(np.clip(edge_magnitude, 0, 255))
+    except Exception as e:
+        st.error(f"边缘检测失败: {str(e)}")
+        result_dict['edges'] = image.copy()
+        result_dict['edges_original'] = gray
     
-    elif operator == "Laplacian":
-        # Laplacian算子
-        laplacian = cv2.Laplacian(gray, cv2.CV_32F, ksize=3)
-        edge_magnitude = np.uint8(np.clip(np.abs(laplacian), 0, 255))
+    # 应用阈值（对非Canny算子）
+    if operator != "Canny" and 'edges_original' in result_dict:
+        edges_binary = cv2.threshold(result_dict['edges_original'], threshold, 255, cv2.THRESH_BINARY)[1]
+        colored_binary = cv2.cvtColor(edges_binary, cv2.COLOR_GRAY2BGR)
+        colored_binary[edges_binary > 0] = [0, 0, 255]  # 红色边缘
+        result_dict['edges_binary'] = colored_binary
     
-    elif operator == "LoG":
-        # LoG算子（Laplacian of Gaussian）
-        blurred = cv2.GaussianBlur(gray, (5, 5), 1)
-        laplacian = cv2.Laplacian(blurred, cv2.CV_32F, ksize=3)
-        edge_magnitude = np.uint8(np.clip(np.abs(laplacian), 0, 255))
-    
-    else:
-        # 默认返回原图
-        edge_magnitude = gray
-    
-    # 转换为3通道图像以便显示
-    edge_image = cv2.cvtColor(edge_magnitude, cv2.COLOR_GRAY2BGR)
-    
-    # 增强边缘效果
-    edge_image = cv2.convertScaleAbs(edge_image, alpha=1.2, beta=20)
-    
-    return edge_image
+    return result_dict
 
-def apply_filter(image, filter_type, kernel_size):
+def apply_filter(image, filter_type, kernel_size, sigma=1.0):
     """
-    应用图像滤波器
+    应用图像滤波器（优化版）
     Args:
         image: 输入的BGR图像
-        filter_type: 滤波器类型（中值滤波, 均值滤波, 高斯滤波）
-        kernel_size: 核大小（必须为奇数）
+        filter_type: 滤波器类型
+        kernel_size: 核大小
+        sigma: 高斯滤波的标准差
     Returns:
         filtered_image: 滤波后的图像
     """
@@ -515,13 +580,22 @@ def apply_filter(image, filter_type, kernel_size):
     
     try:
         if filter_type == "中值滤波":
-            filtered = cv2.medianBlur(image, kernel_size)
+            # 中值滤波对每个通道单独处理
+            if len(image.shape) == 3:
+                filtered = image.copy()
+                for i in range(3):
+                    filtered[:,:,i] = cv2.medianBlur(image[:,:,i], kernel_size)
+            else:
+                filtered = cv2.medianBlur(image, kernel_size)
         
         elif filter_type == "均值滤波":
+            # 均值滤波
             filtered = cv2.blur(image, (kernel_size, kernel_size))
         
         elif filter_type == "高斯滤波":
-            filtered = cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
+            # 高斯滤波
+            sigma = max(0.5, min(5.0, sigma))
+            filtered = cv2.GaussianBlur(image, (kernel_size, kernel_size), sigma)
         
         else:
             filtered = image.copy()
@@ -531,6 +605,57 @@ def apply_filter(image, filter_type, kernel_size):
     except Exception as e:
         st.error(f"滤波处理失败: {str(e)}")
         return image.copy()
+
+def add_noise_to_image(image, noise_type="gaussian", intensity=30):
+    """
+    向图像添加噪声（用于演示）
+    Args:
+        image: 输入图像
+        noise_type: 噪声类型 (gaussian, salt_pepper, speckle)
+        intensity: 噪声强度
+    Returns:
+        noisy_image: 带噪声的图像
+    """
+    if len(image.shape) == 3:
+        noisy = image.astype(np.float32)
+        h, w, c = noisy.shape
+    else:
+        noisy = image.astype(np.float32)
+        h, w = noisy.shape
+        c = 1
+        noisy = noisy.reshape(h, w, 1)
+    
+    if noise_type == "gaussian":
+        # 高斯噪声
+        gauss = np.random.normal(0, intensity, (h, w, c))
+        noisy = noisy + gauss
+        
+    elif noise_type == "salt_pepper":
+        # 椒盐噪声
+        s_vs_p = 0.5
+        amount = intensity / 200.0
+        
+        # 椒噪声
+        num_salt = int(amount * h * w * s_vs_p)
+        coords = [np.random.randint(0, i-1, num_salt) for i in [h, w, c]]
+        noisy[coords[0], coords[1], coords[2]] = 255
+        
+        # 盐噪声
+        num_pepper = int(amount * h * w * (1. - s_vs_p))
+        coords = [np.random.randint(0, i-1, num_pepper) for i in [h, w, c]]
+        noisy[coords[0], coords[1], coords[2]] = 0
+        
+    elif noise_type == "speckle":
+        # 斑点噪声
+        speckle = np.random.randn(h, w, c) * (intensity / 255.0)
+        noisy = noisy + noisy * speckle
+    
+    noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+    
+    if c == 1:
+        noisy = noisy.reshape(h, w)
+    
+    return noisy
 
 def get_image_download_link(img, filename, text):
     """
@@ -577,11 +702,6 @@ def get_image_download_link(img, filename, text):
 def display_image_comparison(original_img, processed_img, original_title="原始图像", processed_title="处理结果"):
     """
     并排显示原始图像和处理结果
-    Args:
-        original_img: 原始图像
-        processed_img: 处理后的图像
-        original_title: 原始图像标题
-        processed_title: 处理结果标题
     """
     col1, col2 = st.columns(2)
     
@@ -595,10 +715,15 @@ def display_image_comparison(original_img, processed_img, original_title="原始
         st.image(display_original, caption=f"📷 {original_title}", use_container_width=True)
         
         # 显示图像信息
+        if len(original_img.shape) == 3:
+            channels = original_img.shape[2]
+        else:
+            channels = 1
+            
         st.caption(f"""
         **图像信息:**
         - 尺寸: {original_img.shape[1]}×{original_img.shape[0]}
-        - 通道数: {original_img.shape[2] if len(original_img.shape) == 3 else 1}
+        - 通道数: {channels}
         - 数据类型: {original_img.dtype}
         """)
     
@@ -612,10 +737,15 @@ def display_image_comparison(original_img, processed_img, original_title="原始
         st.image(display_processed, caption=f"✨ {processed_title}", use_container_width=True)
         
         # 显示处理信息
+        if len(processed_img.shape) == 3:
+            channels = processed_img.shape[2]
+        else:
+            channels = 1
+            
         st.caption(f"""
         **处理信息:**
         - 输出尺寸: {processed_img.shape[1]}×{processed_img.shape[0]}
-        - 输出通道: {processed_img.shape[2] if len(processed_img.shape) == 3 else 1}
+        - 输出通道: {channels}
         - 数据范围: [{processed_img.min()}, {processed_img.max()}]
         """)
 
@@ -660,17 +790,17 @@ def render_sidebar():
 
         # 快速导航
         st.markdown("### 🧭 快速导航")
-        if st.button("🏠 返回首页", use_container_width=True):
+        if st.button("🏠 返回首页", use_container_width=True, key="sidebar_home"):
             st.switch_page("main.py")
-        if st.button("🔬 图像处理实验室", use_container_width=True):
+        if st.button("🔬 图像处理实验室", use_container_width=True, key="sidebar_lab"):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("📤 实验作业提交", use_container_width=True):
+        if st.button("📤 实验作业提交", use_container_width=True, key="sidebar_submit"):
             st.switch_page("pages/实验作业提交.py")
-        if st.button("📚 学习资源中心", use_container_width=True):
+        if st.button("📚 学习资源中心", use_container_width=True, key="sidebar_resources"):
             st.switch_page("pages/2_📚_学习资源中心.py")
-        if st.button("📝 我的思政足迹", use_container_width=True):
+        if st.button("📝 我的思政足迹", use_container_width=True, key="sidebar_footprint"):
             st.switch_page("pages/3_📝_我的思政足迹.py")
-        if st.button("🏆 成果展示", use_container_width=True):
+        if st.button("🏆 成果展示", use_container_width=True, key="sidebar_achievements"):
             st.switch_page("pages/4_🏆_成果展示.py")
 
         # 用户信息显示
@@ -681,7 +811,7 @@ def render_sidebar():
             if st.session_state.student_name:
                 st.info(f"**姓名:** {st.session_state.student_name}")
             
-            if st.button("🚪 退出登录", use_container_width=True):
+            if st.button("🚪 退出登录", use_container_width=True, key="sidebar_logout"):
                 for key in ['logged_in', 'username', 'role', 'student_name']:
                     if key in st.session_state:
                         del st.session_state[key]
@@ -756,7 +886,7 @@ def render_resource_upload():
         </div>
         """, unsafe_allow_html=True)
         
-        if st.button("🏠 返回首页", use_container_width=True):
+        if st.button("🏠 返回首页", use_container_width=True, key="resource_return_home"):
             st.switch_page("main.py")
         return
     
@@ -892,7 +1022,7 @@ def render_resource_upload():
         if not filtered_resources:
             st.info("📭 暂无可见的资源")
         else:
-            for resource in filtered_resources:
+            for i, resource in enumerate(filtered_resources):
                 is_owner = resource.get("uploader") == st.session_state.username
                 
                 col1, col2 = st.columns([4, 1])
@@ -967,13 +1097,13 @@ def render_resource_upload():
                             file_name=resource["original_filename"],
                             mime="application/octet-stream",
                             use_container_width=True,
-                            key=f"download_{resource['id']}"
+                            key=f"download_{resource['id']}_{i}"
                         )
                     
                     # 删除按钮（仅资源所有者或管理员可见）
                     if is_owner or st.session_state.role in ["admin", "teacher"]:
                         if st.button("🗑️ 撤销", 
-                                   key=f"delete_{resource['id']}",
+                                   key=f"delete_{resource['id']}_{i}",
                                    use_container_width=True,
                                    type="secondary"):
                             # 删除文件
@@ -1006,7 +1136,7 @@ def render_project_library():
         </div>
         """, unsafe_allow_html=True)
         
-        if st.button("🏠 返回首页", use_container_width=True):
+        if st.button("🏠 返回首页", use_container_width=True, key="project_return_home"):
             st.switch_page("main.py")
         return
     
@@ -1199,11 +1329,11 @@ def render_teacher_project_interface(projects):
             # 项目筛选
             col1, col2, col3 = st.columns(3)
             with col1:
-                filter_year = st.selectbox("按学年筛选", ["全部"] + list(set(p["academic_year"] for p in projects)))
+                filter_year = st.selectbox("按学年筛选", ["全部"] + list(set(p["academic_year"] for p in projects)), key="filter_year_teacher")
             with col2:
-                filter_type = st.selectbox("按类型筛选", ["全部"] + list(set(p["type"] for p in projects)))
+                filter_type = st.selectbox("按类型筛选", ["全部"] + list(set(p["type"] for p in projects)), key="filter_type_teacher")
             with col3:
-                filter_difficulty = st.selectbox("按难度筛选", ["全部", "简单", "中等", "较难", "困难", "挑战"])
+                filter_difficulty = st.selectbox("按难度筛选", ["全部", "简单", "中等", "较难", "困难", "挑战"], key="filter_difficulty_teacher")
             
             # 过滤项目
             filtered_projects = projects
@@ -1218,7 +1348,7 @@ def render_teacher_project_interface(projects):
                 st.info("📭 没有符合条件的项目")
 
             else:
-                for project in filtered_projects:
+                for i, project in enumerate(filtered_projects):
                     # 项目卡片
                     st.markdown(f"""
                     <div class='project-card'>
@@ -1236,7 +1366,7 @@ def render_teacher_project_interface(projects):
                                 <span style="color: #dc2626; font-weight: bold;">{project['difficulty']}</span>
                             </div>
                         </div>
-                    </div>""", unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
                     
                     st.markdown(f"""    
                         <p style="color: #4b5563; margin: 10px 0; font-size: 0.95rem;">{project['description']}</p>""", unsafe_allow_html=True)
@@ -1280,19 +1410,19 @@ def render_teacher_project_interface(projects):
                                 data=proposal_data,
                                 file_name=project['proposal_file']['original_name'],
                                 mime="application/octet-stream",
-                                key=f"download_proposal_{project['id']}",
+                                key=f"download_proposal_{project['id']}_{i}",
                                 use_container_width=True
                             )
                     
                     with col2:
                         # 查看数据集
                         if project.get('datasets'):
-                            if st.button("📊 查看数据集", key=f"view_dataset_{project['id']}", use_container_width=True):
+                            if st.button("📊 查看数据集", key=f"view_dataset_{project['id']}_{i}", use_container_width=True):
                                 # 显示数据集文件列表
                                 st.session_state[f"show_dataset_{project['id']}"] = not st.session_state.get(f"show_dataset_{project['id']}", False)
                         
                         if st.session_state.get(f"show_dataset_{project['id']}", False) and project.get('datasets'):
-                            for dataset in project['datasets']:
+                            for j, dataset in enumerate(project['datasets']):
                                 dataset_path = os.path.join(PROJECTS_DIR, project['id'], "datasets", dataset['filename'])
                                 if os.path.exists(dataset_path):
                                     with open(dataset_path, "rb") as f:
@@ -1307,18 +1437,18 @@ def render_teacher_project_interface(projects):
                                             data=dataset_data,
                                             file_name=dataset['original_name'],
                                             mime="application/octet-stream",
-                                            key=f"download_dataset_{project['id']}_{dataset['filename']}",
+                                            key=f"download_dataset_{project['id']}_{i}_{j}",
                                             use_container_width=True
                                         )
                     
                     with col3:
                         # 查看学生代码
                         if project.get('student_codes'):
-                            if st.button("💻 查看代码", key=f"view_code_{project['id']}", use_container_width=True):
+                            if st.button("💻 查看代码", key=f"view_code_{project['id']}_{i}", use_container_width=True):
                                 st.session_state[f"show_code_{project['id']}"] = not st.session_state.get(f"show_code_{project['id']}", False)
                         
                         if st.session_state.get(f"show_code_{project['id']}", False) and project.get('student_codes'):
-                            for code in project['student_codes']:
+                            for k, code in enumerate(project['student_codes']):
                                 code_path = os.path.join(PROJECTS_DIR, project['id'], "student_codes", code['filename'])
                                 if os.path.exists(code_path):
                                     with open(code_path, "rb") as f:
@@ -1334,14 +1464,14 @@ def render_teacher_project_interface(projects):
                                             data=code_data,
                                             file_name=code['original_name'],
                                             mime="application/octet-stream",
-                                            key=f"download_code_{project['id']}_{code['filename']}",
+                                            key=f"download_code_{project['id']}_{i}_{k}",
                                             use_container_width=True
                                         )
                     
                     with col4:
                         # 删除项目（仅创建者或管理员）
                         if project['created_by'] == st.session_state.username or st.session_state.role in ["admin", "teacher"]:
-                            if st.button("🗑️ 删除", key=f"delete_project_{project['id']}", use_container_width=True, type="secondary"):
+                            if st.button("🗑️ 删除", key=f"delete_project_{project['id']}_{i}", use_container_width=True, type="secondary"):
                                 # 删除项目目录
                                 project_dir = os.path.join(PROJECTS_DIR, project['id'])
                                 if os.path.exists(project_dir):
@@ -1373,9 +1503,9 @@ def render_student_project_interface(projects):
         # 项目筛选
         col1, col2 = st.columns(2)
         with col1:
-            filter_difficulty = st.selectbox("按难度筛选", ["全部", "简单", "中等", "较难", "困难", "挑战"])
+            filter_difficulty = st.selectbox("按难度筛选", ["全部", "简单", "中等", "较难", "困难", "挑战"], key="filter_difficulty_student")
         with col2:
-            filter_type = st.selectbox("按类型筛选", ["全部"] + list(set(p["type"] for p in projects)))
+            filter_type = st.selectbox("按类型筛选", ["全部"] + list(set(p["type"] for p in projects)), key="filter_type_student")
         
         # 过滤项目
         filtered_projects = projects
@@ -1387,7 +1517,7 @@ def render_student_project_interface(projects):
         if not filtered_projects:
             st.info("📭 没有符合条件的项目")
         else:
-            for project in filtered_projects:
+            for i, project in enumerate(filtered_projects):
                 # 项目卡片
                 st.markdown(f"""
                 <div class='project-card student'>
@@ -1402,7 +1532,7 @@ def render_student_project_interface(projects):
                             <span style="color: #dc2626; font-weight: bold;">{project['difficulty']}</span>
                         </div>
                     </div>
-                </div>""", unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
                 st.markdown(f"""  
                     <p style="color: #4b5563; margin: 10px 0; font-size: 0.95rem;">{project['description']}</p>
                  """, unsafe_allow_html=True)
@@ -1413,7 +1543,7 @@ def render_student_project_interface(projects):
                         <span class="badge blue">📊 {len(project.get('datasets', []))}个数据集</span>
                         <span class="badge blue">💻 {len(project.get('student_codes', []))}个代码版本</span>
                     </div>
-                
+                </div>
                 """, unsafe_allow_html=True)
                 
                 # 操作按钮
@@ -1431,14 +1561,14 @@ def render_student_project_interface(projects):
                             data=proposal_data,
                             file_name=project['proposal_file']['original_name'],
                             mime="application/octet-stream",
-                            key=f"student_download_proposal_{project['id']}",
+                            key=f"student_download_proposal_{project['id']}_{i}",
                             use_container_width=True
                         )
                 
                 with col2:
                     # 下载数据集
                     if project.get('datasets'):
-                        if st.button("📊 下载数据集", key=f"student_download_dataset_{project['id']}", use_container_width=True):
+                        if st.button("📊 下载数据集", key=f"student_download_dataset_{project['id']}_{i}", use_container_width=True):
                             # 如果是单个文件，直接下载；如果是多个文件，打包下载
                             if len(project['datasets']) == 1:
                                 dataset = project['datasets'][0]
@@ -1452,7 +1582,7 @@ def render_student_project_interface(projects):
                                         data=dataset_data,
                                         file_name=dataset['original_name'],
                                         mime="application/octet-stream",
-                                        key=f"student_single_dataset_{project['id']}"
+                                        key=f"student_single_dataset_{project['id']}_{i}"
                                     )
                             else:
                                 # 创建压缩包
@@ -1476,25 +1606,25 @@ def render_student_project_interface(projects):
                                         data=zip_data,
                                         file_name=f"{project['id']}_datasets.zip",
                                         mime="application/zip",
-                                        key=f"student_zip_dataset_{project['id']}"
+                                        key=f"student_zip_dataset_{project['id']}_{i}"
                                     )
                 
                 with col3:
                     # 上传我的代码
-                    if st.button("💻 上传代码", key=f"student_upload_code_{project['id']}", use_container_width=True):
+                    if st.button("💻 上传代码", key=f"student_upload_code_{project['id']}_{i}", use_container_width=True):
                         st.session_state[f"show_upload_{project['id']}"] = not st.session_state.get(f"show_upload_{project['id']}", False)
                 
                 # 代码上传表单
                 if st.session_state.get(f"show_upload_{project['id']}", False):
-                    with st.form(f"upload_code_form_{project['id']}", clear_on_submit=True):
+                    with st.form(f"upload_code_form_{project['id']}_{i}", clear_on_submit=True):
                         code_file = st.file_uploader("选择代码文件", 
                             type=["py", "java", "c", "cpp", "ipynb", "zip", "rar", "7z"],
-                            key=f"code_file_{project['id']}",
+                            key=f"code_file_{project['id']}_{i}",
                             help="可以上传单个代码文件或整个项目的压缩包")
                         
                         code_description = st.text_area("代码说明", 
                             placeholder="请简要描述代码功能和修改内容...",
-                            key=f"code_desc_{project['id']}",
+                            key=f"code_desc_{project['id']}_{i}",
                             height=80)
                         
                         submitted = st.form_submit_button("🚀 上传代码", use_container_width=True)
@@ -1569,7 +1699,7 @@ def render_student_project_interface(projects):
             # 按上传时间排序
             student_codes.sort(key=lambda x: x['upload_time'], reverse=True)
             
-            for code in student_codes:
+            for i, code in enumerate(student_codes):
                 # 在页面开头添加自定义CSS
                 st.markdown("""
                     <style>
@@ -1616,13 +1746,13 @@ def render_student_project_interface(projects):
                             data=code_data,
                             file_name=code['original_name'],
                             mime="application/octet-stream",
-                            key=f"download_my_code_{code['id']}",
+                            key=f"download_my_code_{code['id']}_{i}",
                             use_container_width=True
                         )
                 
                 with col2:
                     # 删除代码（仅上传者可删除）
-                    if st.button("🗑️ 删除", key=f"delete_my_code_{code['id']}", use_container_width=True, type="secondary"):
+                    if st.button("🗑️ 删除", key=f"delete_my_code_{code['id']}_{i}", use_container_width=True, type="secondary"):
                         try:
                             # 删除文件
                             if os.path.exists(code_path):
@@ -1643,10 +1773,10 @@ def render_student_project_interface(projects):
                 
                 st.markdown("---")
 
-# ================== 重新设计的在线实践工具页面 ==================
+# ================== 优化的在线实践工具页面 ==================
 
 def render_online_tools():
-    """渲染在线实践工具页面"""
+    """渲染优化的在线实践工具页面"""
     st.markdown('<div class="section-title">🛠️ 在线实践工具</div>', unsafe_allow_html=True)
     
     # 创建工具标签页
@@ -1690,11 +1820,26 @@ def render_online_tools():
             )
             
             if uploaded_file is not None:
-                # 图像预览
+                # 读取并转换图像
                 image = Image.open(uploaded_file)
-                st.image(image, caption="📷 上传的图像预览", use_container_width=True)
+                image_np = np.array(image)
                 
-                # 参数设置
+                # 转换图像格式
+                if len(image_np.shape) == 2:
+                    # 灰度图转BGR
+                    image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+                elif image_np.shape[2] == 4:
+                    # RGBA转BGR
+                    image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2BGR)
+                elif image_np.shape[2] == 3:
+                    # RGB转BGR
+                    image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+                
+                # 显示彩色图像
+                display_img = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+                st.image(display_img, caption="📷 上传的彩色图像", use_container_width=True)
+                
+                # 算子选择
                 operator = st.selectbox(
                     "选择边缘检测算子",
                     ["Roberts", "Sobel", "Prewitt", "Laplacian", "LoG", "Canny"],
@@ -1713,26 +1858,24 @@ def render_online_tools():
                 }
                 st.info(f"**{operator}算子：** {operator_descriptions[operator]}")
                 
-                # 算子参数设置区域
+                # 参数设置
                 st.markdown("#### 🔧 算子参数")
                 
-                # 初始化参数字典
                 edge_params = {}
                 
-                # 通用参数：边缘强度阈值
+                # 边缘强度阈值
                 edge_threshold = st.slider(
                     "边缘强度阈值",
                     min_value=0,
                     max_value=255,
-                    value=30,
+                    value=50,
                     key="edge_threshold_slider",
                     help="值越大，检测到的边缘越少"
                 )
                 edge_params['threshold'] = edge_threshold
                 
-                # 根据选择的算子显示不同的参数控制
+                # 根据算子显示特定参数
                 if operator in ["Sobel", "Prewitt"]:
-                    # Sobel和Prewitt的核大小
                     kernel_size = st.selectbox(
                         "核大小",
                         [3, 5, 7],
@@ -1742,13 +1885,16 @@ def render_online_tools():
                     )
                     edge_params['kernel_size'] = kernel_size
                     
-                    # 是否显示梯度方向
-                    show_direction = st.checkbox("显示梯度方向图", value=False, 
-                                                 key=f"{operator.lower()}_direction_check")
-                    edge_params['show_direction'] = show_direction
-                    
+                    # Sobel额外参数
+                    if operator == "Sobel":
+                        scale = st.slider("比例因子", 0.5, 2.0, 1.0, 0.1, 
+                                        key=f"{operator.lower()}_scale_select")
+                        delta = st.slider("偏移量", 0, 50, 0, 1,
+                                        key=f"{operator.lower()}_delta_select")
+                        edge_params['scale'] = scale
+                        edge_params['delta'] = delta
+                        
                 elif operator == "LoG":
-                    # LoG的高斯核大小
                     log_kernel = st.slider(
                         "高斯核大小",
                         min_value=3,
@@ -1760,7 +1906,6 @@ def render_online_tools():
                     )
                     edge_params['log_kernel'] = log_kernel
                     
-                    # LoG的标准差
                     log_sigma = st.slider(
                         "高斯标准差 (σ)",
                         min_value=0.5,
@@ -1773,7 +1918,6 @@ def render_online_tools():
                     edge_params['sigma'] = log_sigma
                     
                 elif operator == "Laplacian":
-                    # Laplacian的核大小
                     laplacian_kernel = st.selectbox(
                         "核大小",
                         [3, 5],
@@ -1784,7 +1928,6 @@ def render_online_tools():
                     edge_params['kernel_size'] = laplacian_kernel
                     
                 elif operator == "Canny":
-                    # Canny算子的阈值
                     col_th1, col_th2 = st.columns(2)
                     with col_th1:
                         canny_threshold1 = st.slider(
@@ -1807,7 +1950,6 @@ def render_online_tools():
                     edge_params['threshold1'] = canny_threshold1
                     edge_params['threshold2'] = canny_threshold2
                     
-                    # Canny的高斯核大小（用于平滑）
                     canny_blur_kernel = st.slider(
                         "高斯平滑核大小",
                         min_value=3,
@@ -1819,100 +1961,85 @@ def render_online_tools():
                     )
                     edge_params['blur_kernel'] = canny_blur_kernel
                 
-                # 添加噪声选项（用于演示）
+                # 添加噪声选项
                 add_noise = st.checkbox("添加随机噪声（用于演示）", value=False, key="edge_noise_check")
                 noise_level = 0
                 if add_noise:
-                    noise_level = st.slider("噪声强度", 10, 50, 20, key="edge_noise_level_slider")
+                    noise_type = st.selectbox("噪声类型", ["gaussian", "salt_pepper", "speckle"], 
+                                           key="noise_type_select")
+                    noise_level = st.slider("噪声强度", 10, 100, 30, key="edge_noise_level_slider")
+                    edge_params['noise_type'] = noise_type
                     edge_params['noise_level'] = noise_level
                 
                 # 处理按钮
                 if st.button("🚀 执行边缘检测", key="edge_detect_btn", type="primary", use_container_width=True):
                     try:
-                        # 转换图像为numpy数组
-                        image_np = np.array(image)
-                        
-                        # 灰度处理
-                        gray = None
-                        if len(image_np.shape) == 3:
-                            if image_np.shape[2] == 4:
-                                gray = cv2.cvtColor(image_np, cv2.COLOR_RGBA2GRAY)
-                            elif image_np.shape[2] == 3:
-                                gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-                        else:
-                            gray = image_np.copy()
-                        
-                        # 添加噪声（如果选择了）
-                        if add_noise and noise_level > 0:
-                            noise = np.random.randint(-noise_level, noise_level, gray.shape)
-                            gray = np.clip(gray.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-                        
-                        # 执行边缘检测
                         with st.spinner(f"正在应用{operator}算子..."):
-                            result_dict = apply_edge_detection_with_params(gray, operator, edge_params)
-                        
-                        # 保存结果到session_state
-                        st.session_state['edge_original'] = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR) if len(image_np.shape) == 3 else image_np
-                        st.session_state['edge_gray'] = gray
-                        st.session_state['edge_result'] = result_dict['edges']
-                        st.session_state['edge_operator'] = operator
-                        st.session_state['edge_params'] = edge_params
-                        
-                        if 'grad_x' in result_dict:
-                            st.session_state['edge_grad_x'] = result_dict['grad_x']
-                        if 'grad_y' in result_dict:
-                            st.session_state['edge_grad_y'] = result_dict['grad_y']
-                        if 'direction' in result_dict:
-                            st.session_state['edge_direction'] = result_dict['direction']
-                        
-                        # 计算边缘强度分布
-                        edges = result_dict['edges']
-                        st.session_state['edge_hist'] = np.histogram(edges.flatten(), bins=50, range=(0, 255))[0]
-                        
-                        st.success(f"✅ {operator}边缘检测完成！")
-                        
+                            # 添加噪声（如果选择了）
+                            processed_img = image_np.copy()
+                            if add_noise and noise_level > 0:
+                                processed_img = add_noise_to_image(
+                                    processed_img, 
+                                    noise_type, 
+                                    noise_level
+                                )
+                            
+                            # 执行边缘检测
+                            result_dict = apply_edge_detection(processed_img, operator, edge_params)
+                            
+                            # 保存结果到session_state
+                            st.session_state['edge_original'] = image_np
+                            st.session_state['edge_noisy'] = processed_img if add_noise else None
+                            st.session_state['edge_result'] = result_dict['edges']
+                            st.session_state['edge_operator'] = operator
+                            st.session_state['edge_params'] = edge_params
+                            st.session_state['edge_result_dict'] = result_dict
+                            
+                            # 计算统计信息
+                            if 'edges_original' in result_dict:
+                                edges = result_dict['edges_original']
+                                st.session_state['edge_stats'] = {
+                                    'mean': np.mean(edges),
+                                    'std': np.std(edges),
+                                    'max': np.max(edges),
+                                    'min': np.min(edges),
+                                    'edge_pixels': np.sum(edges > edge_threshold),
+                                    'total_pixels': edges.shape[0] * edges.shape[1]
+                                }
+                            
+                            st.success(f"✅ {operator}边缘检测完成！")
+                            
                     except Exception as e:
                         st.error(f"边缘检测失败: {str(e)}")
-                        st.exception(e)
             
             else:
                 st.info("👆 请先上传图像文件")
                 
                 # 示例图像
                 if st.button("📸 使用示例图像", key="edge_example_btn", use_container_width=True):
-                    # 创建示例图像（带有不同边缘的测试图案）
-                    example_img = np.zeros((300, 400), dtype=np.uint8)
+                    # 创建示例图像（彩色）
+                    example_img = np.zeros((300, 400, 3), dtype=np.uint8)
                     
-                    # 添加不同方向的边缘
-                    cv2.rectangle(example_img, (100, 50), (150, 100), 255, -1)  # 方形边缘
-                    cv2.rectangle(example_img, (200, 150), (250, 200), 128, -1)  # 较弱的边缘
+                    # 添加不同颜色的形状
+                    cv2.rectangle(example_img, (50, 50), (150, 150), (255, 0, 0), -1)  # 蓝色矩形
+                    cv2.rectangle(example_img, (200, 150), (300, 250), (0, 255, 0), -1)  # 绿色矩形
+                    cv2.circle(example_img, (350, 100), 40, (0, 0, 255), -1)  # 红色圆形
                     
-                    # 添加对角线边缘
-                    for i in range(100, 200):
-                        example_img[i, i] = 255
-                        example_img[i, 400-i] = 255
-                    
-                    # 添加圆形边缘
-                    cv2.circle(example_img, (300, 100), 30, 200, -1)
-                    
-                    # 添加高斯模糊模拟真实图像
-                    example_img = cv2.GaussianBlur(example_img, (3, 3), 1)
+                    # 添加一些纹理
+                    noise = np.random.randint(-20, 20, example_img.shape)
+                    example_img = np.clip(example_img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
                     
                     # 保存到session_state
-                    st.session_state['edge_original'] = cv2.cvtColor(example_img, cv2.COLOR_GRAY2BGR)
-                    st.session_state['edge_gray'] = example_img
+                    st.session_state['edge_original'] = example_img
+                    st.session_state['edge_operator'] = "Sobel"
                     
                     # 应用Sobel算子作为示例
-                    params = {'threshold': 30, 'kernel_size': 3}
-                    result_dict = apply_edge_detection_with_params(example_img, "Sobel", params)
+                    params = {'threshold': 50, 'kernel_size': 3, 'scale': 1.0, 'delta': 0}
+                    result_dict = apply_edge_detection(example_img, "Sobel", params)
                     st.session_state['edge_result'] = result_dict['edges']
-                    st.session_state['edge_operator'] = "Sobel"
                     st.session_state['edge_params'] = params
+                    st.session_state['edge_result_dict'] = result_dict
                     st.session_state['using_example'] = True
-                    
-                    # 保存梯度信息
-                    st.session_state['edge_grad_x'] = result_dict.get('grad_x', None)
-                    st.session_state['edge_grad_y'] = result_dict.get('grad_y', None)
                     
                     st.success("✅ 已加载示例图像")
         
@@ -1924,90 +2051,44 @@ def render_online_tools():
                 operator = st.session_state.get('edge_operator', '边缘检测')
                 params = st.session_state.get('edge_params', {})
                 
-                # 显示原始图像和处理结果对比
-                if 'edge_gray' in st.session_state:
-                    # 显示灰度图和边缘图对比
-                    col_gray, col_edge = st.columns(2)
+                # 显示对比结果
+                if 'edge_noisy' in st.session_state and st.session_state['edge_noisy'] is not None:
+                    # 显示噪声图像和边缘检测结果
+                    col_orig, col_noisy, col_edge = st.columns(3)
                     
-                    with col_gray:
-                        gray_img = st.session_state['edge_gray']
-                        if len(gray_img.shape) == 2:
-                            st.image(gray_img, caption="🎨 灰度图像", use_container_width=True, 
-                                    clamp=True, channels="GRAY")
-                        else:
-                            st.image(gray_img, caption="🎨 灰度图像", use_container_width=True)
+                    with col_orig:
+                        display_orig = cv2.cvtColor(st.session_state['edge_original'], cv2.COLOR_BGR2RGB)
+                        st.image(display_orig, caption="📷 原始图像", use_container_width=True)
+                    
+                    with col_noisy:
+                        display_noisy = cv2.cvtColor(st.session_state['edge_noisy'], cv2.COLOR_BGR2RGB)
+                        st.image(display_noisy, caption="📈 添加噪声后", use_container_width=True)
                     
                     with col_edge:
-                        edge_img = st.session_state['edge_result']
-                        if len(edge_img.shape) == 2:
-                            st.image(edge_img, caption=f"🔍 {operator}边缘检测", 
-                                    use_container_width=True, clamp=True, channels="GRAY")
-                        else:
-                            st.image(edge_img, caption=f"🔍 {operator}边缘检测", 
-                                    use_container_width=True)
+                        display_edge = st.session_state['edge_result']
+                        if len(display_edge.shape) == 3:
+                            display_edge = cv2.cvtColor(display_edge, cv2.COLOR_BGR2RGB)
+                        st.image(display_edge, caption=f"🔍 {operator}边缘检测", use_container_width=True)
+                else:
+                    # 显示原始图像和边缘检测结果
+                    col_orig, col_edge = st.columns(2)
+                    
+                    with col_orig:
+                        display_orig = cv2.cvtColor(st.session_state['edge_original'], cv2.COLOR_BGR2RGB)
+                        st.image(display_orig, caption="📷 原始图像", use_container_width=True)
+                    
+                    with col_edge:
+                        display_edge = st.session_state['edge_result']
+                        if len(display_edge.shape) == 3:
+                            display_edge = cv2.cvtColor(display_edge, cv2.COLOR_BGR2RGB)
+                        st.image(display_edge, caption=f"🔍 {operator}边缘检测", use_container_width=True)
                 
-                # 显示梯度分量（对于Sobel/Prewitt算子）
-                if operator in ["Sobel", "Prewitt"] and 'edge_grad_x' in st.session_state:
-                    st.markdown("#### 📐 梯度分量")
-                    col_gx, col_gy = st.columns(2)
-                    
-                    with col_gx:
-                        grad_x = st.session_state['edge_grad_x']
-                        # 归一化显示
-                        grad_x_norm = cv2.normalize(np.abs(grad_x), None, 0, 255, cv2.NORM_MINMAX)
-                        st.image(grad_x_norm.astype(np.uint8), caption="X方向梯度 (Gx)", 
-                                use_container_width=True, clamp=True, channels="GRAY")
-                    
-                    with col_gy:
-                        grad_y = st.session_state['edge_grad_y']
-                        # 归一化显示
-                        grad_y_norm = cv2.normalize(np.abs(grad_y), None, 0, 255, cv2.NORM_MINMAX)
-                        st.image(grad_y_norm.astype(np.uint8), caption="Y方向梯度 (Gy)", 
-                                use_container_width=True, clamp=True, channels="GRAY")
-                
-                # 显示梯度方向图（如果启用了）
-                if operator in ["Sobel", "Prewitt"] and params.get('show_direction', False) and 'edge_direction' in st.session_state:
-                    st.markdown("#### 🧭 梯度方向可视化")
-                    
-                    direction_img = st.session_state['edge_direction']
-                    edge_strength = st.session_state['edge_result']
-                    
-                    # 创建方向彩色图
-                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-                    
-                    # 左图：方向分布直方图
-                    angles_deg = np.degrees(direction_img.flatten())
-                    ax1.hist(angles_deg, bins=36, range=(0, 360), alpha=0.7, color='skyblue', edgecolor='black')
-                    ax1.set_xlabel('梯度方向 (度)')
-                    ax1.set_ylabel('像素数量')
-                    ax1.set_title('梯度方向分布')
-                    ax1.grid(True, alpha=0.3)
-                    ax1.set_xlim(0, 360)
-                    
-                    # 右图：方向彩色图
-                    hsv = np.zeros((direction_img.shape[0], direction_img.shape[1], 3), dtype=np.uint8)
-                    hsv[..., 0] = ((direction_img + np.pi) * 180 / (2 * np.pi)).astype(np.uint8)  # 0-180度
-                    hsv[..., 1] = 200
-                    hsv[..., 2] = np.clip(edge_strength, 50, 255).astype(np.uint8)
-                    
-                    direction_color = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-                    ax2.imshow(direction_color)
-                    ax2.set_title('梯度方向彩色图')
-                    ax2.axis('off')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    
-                    # 添加方向图例
-                    st.markdown("""
-                    <div style='text-align: center; margin: 10px 0;'>
-                        <div style='background: linear-gradient(90deg, red, yellow, lime, cyan, blue, magenta, red); 
-                                    height: 20px; border-radius: 10px;'></div>
-                        <p style='font-size: 0.8em; color: #666;'>
-                        方向图例：0°(红) → 45°(黄) → 90°(绿) → 135°(青) → 180°(蓝) → 225°(品红) → 270°(红)
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                # 显示二值化边缘（如果有）
+                if 'edge_result_dict' in st.session_state and 'edges_binary' in st.session_state['edge_result_dict']:
+                    st.markdown("#### 🎯 二值化边缘")
+                    binary_edges = st.session_state['edge_result_dict']['edges_binary']
+                    display_binary = cv2.cvtColor(binary_edges, cv2.COLOR_BGR2RGB)
+                    st.image(display_binary, caption="🎯 二值化边缘图（红色为边缘）", use_container_width=True)
         
         with col3:
             # 详细分析和统计区域
@@ -2021,7 +2102,7 @@ def render_online_tools():
                 st.markdown("#### 📝 参数设置")
                 param_text = f"""
                 **算子:** {operator}  
-                **边缘阈值:** {params.get('threshold', 30)}
+                **边缘阈值:** {params.get('threshold', 50)}
                 """
                 
                 if operator in ["Sobel", "Prewitt"]:
@@ -2037,154 +2118,61 @@ def render_online_tools():
                     param_text += f"  \n**平滑核:** {params.get('blur_kernel', 5)}×{params.get('blur_kernel', 5)}"
                 
                 if params.get('noise_level', 0) > 0:
-                    param_text += f"  \n**添加噪声:** {params.get('noise_level', 0)}"
+                    param_text += f"  \n**噪声类型:** {params.get('noise_type', 'gaussian')}"
+                    param_text += f"  \n**噪声强度:** {params.get('noise_level', 0)}"
                 
                 st.info(param_text)
                 
                 # 边缘统计信息
                 st.markdown("#### 📈 边缘统计")
                 
-                edge_result = st.session_state['edge_result']
-                edge_threshold = params.get('threshold', 30)
-                
-                # 计算统计信息
-                edge_pixels = np.sum(edge_result > edge_threshold)
-                total_pixels = edge_result.shape[0] * edge_result.shape[1]
-                edge_ratio = (edge_pixels / total_pixels) * 100
-                
-                # 边缘强度统计
-                edge_strength_mean = np.mean(edge_result)
-                edge_strength_std = np.std(edge_result)
-                edge_strength_max = np.max(edge_result)
-                edge_strength_min = np.min(edge_result)
-                
-                # 显示统计指标
-                col_stats1, col_stats2 = st.columns(2)
-                with col_stats1:
-                    st.metric("边缘像素数", f"{edge_pixels:,}")
-                    st.metric("平均强度", f"{edge_strength_mean:.1f}")
-                with col_stats2:
-                    st.metric("边缘占比", f"{edge_ratio:.1f}%")
-                    st.metric("强度标准差", f"{edge_strength_std:.1f}")
-                
-                # 边缘强度直方图
-                st.markdown("#### 📊 边缘强度分布")
-                
-                # 创建直方图
-                fig, ax = plt.subplots(figsize=(5, 3))
-                n, bins, patches = ax.hist(edge_result.flatten(), bins=50, alpha=0.7, 
-                                          color='skyblue', edgecolor='black')
-                
-                # 标记阈值
-                threshold = params.get('threshold', 30)
-                ax.axvline(x=threshold, color='red', linestyle='--', linewidth=2, 
-                          label=f'阈值={threshold}')
-                
-                # 填充超过阈值的区域
-                bin_centers = 0.5 * (bins[:-1] + bins[1:])
-                over_threshold = bin_centers > threshold
-                for patch, over in zip(patches, over_threshold):
-                    if over:
-                        patch.set_facecolor('lightcoral')
-                        patch.set_alpha(0.8)
-                
-                ax.set_xlabel('边缘强度')
-                ax.set_ylabel('像素数量')
-                ax.set_title('边缘强度直方图')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                
-                st.pyplot(fig)
+                if 'edge_stats' in st.session_state:
+                    stats = st.session_state['edge_stats']
+                    
+                    col_stats1, col_stats2 = st.columns(2)
+                    with col_stats1:
+                        st.metric("边缘像素数", f"{stats['edge_pixels']:,}")
+                        st.metric("平均强度", f"{stats['mean']:.1f}")
+                    with col_stats2:
+                        edge_ratio = (stats['edge_pixels'] / stats['total_pixels']) * 100
+                        st.metric("边缘占比", f"{edge_ratio:.1f}%")
+                        st.metric("强度标准差", f"{stats['std']:.1f}")
                 
                 # 下载按钮
                 st.markdown("---")
-                col_dl1, col_dl2 = st.columns(2)
+                col_dl1, col_dl2, col_dl3 = st.columns(3)
+                
                 with col_dl1:
                     # 下载原始图像
                     original_filename = "original_image.jpg"
                     st.markdown(get_image_download_link(
                         st.session_state['edge_original'],
                         original_filename,
-                        "📥 原始图像"
+                        "📥 原始图"
                     ), unsafe_allow_html=True)
                 
                 with col_dl2:
-                    # 下载处理结果
+                    # 下载边缘结果
                     result_filename = f"edge_detection_{operator}.jpg"
                     st.markdown(get_image_download_link(
                         st.session_state['edge_result'],
                         result_filename,
-                        "📥 边缘结果"
+                        "📥 边缘图"
                     ), unsafe_allow_html=True)
                 
-                # 额外下载梯度图
-                if operator in ["Sobel", "Prewitt"] and 'edge_grad_x' in st.session_state:
-                    st.markdown(get_image_download_link(
-                        cv2.normalize(np.abs(st.session_state['edge_grad_x']), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8),
-                        f"gradient_x_{operator}.jpg",
-                        "📥 X方向梯度"
-                    ), unsafe_allow_html=True)
+                with col_dl3:
+                    # 下载二值边缘（如果有）
+                    if 'edge_result_dict' in st.session_state and 'edges_binary' in st.session_state['edge_result_dict']:
+                        binary_filename = f"edge_binary_{operator}.jpg"
+                        st.markdown(get_image_download_link(
+                            st.session_state['edge_result_dict']['edges_binary'],
+                            binary_filename,
+                            "📥 二值图"
+                        ), unsafe_allow_html=True)
             
             else:
                 st.info("👈 请先在左侧上传图像并点击处理按钮")
-                
-                # 显示算子比较说明
-                st.markdown("""
-                <div style='background: linear-gradient(135deg, #e0f2fe, #bae6fd); 
-                            padding: 15px; border-radius: 10px; margin-top: 20px;'>
-                    <h4>🔍 各算子特点对比</h4>
-                    <table style="width:100%; font-size:0.85em; border-collapse: collapse;">
-                        <thead>
-                            <tr style="background-color: #4b5563; color: white;">
-                                <th style="padding: 8px; text-align: left;">算子</th>
-                                <th style="padding: 8px; text-align: left;">优点</th>
-                                <th style="padding: 8px; text-align: left;">缺点</th>
-                                <th style="padding: 8px; text-align: left;">适用场景</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><strong>Roberts</strong></td>
-                                <td style="padding: 8px;">计算简单快速</td>
-                                <td style="padding: 8px;">对噪声敏感</td>
-                                <td style="padding: 8px;">实时应用</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><strong>Sobel</strong></td>
-                                <td style="padding: 8px;">抗噪声较好</td>
-                                <td style="padding: 8px;">边缘较粗</td>
-                                <td style="padding: 8px;">一般应用</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><strong>Prewitt</strong></td>
-                                <td style="padding: 8px;">边缘定位准确</td>
-                                <td style="padding: 8px;">抗噪声一般</td>
-                                <td style="padding: 8px;">精确边缘</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><strong>Laplacian</strong></td>
-                                <td style="padding: 8px;">检测过零点</td>
-                                <td style="padding: 8px;">对噪声敏感</td>
-                                <td style="padding: 8px;">精细边缘</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><strong>LoG</strong></td>
-                                <td style="padding: 8px;">抗噪性强</td>
-                                <td style="padding: 8px;">计算复杂</td>
-                                <td style="padding: 8px;">高质量检测</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px;"><strong>Canny</strong></td>
-                                <td style="padding: 8px;">精度高，抗噪</td>
-                                <td style="padding: 8px;">计算复杂</td>
-                                <td style="padding: 8px;">高精度应用</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                """, unsafe_allow_html=True)
     
-    # 工具标签页2的代码保持不变   
     with tool_tab2:
         st.markdown("""
         <div class='resource-card tool'>
@@ -2220,9 +2208,24 @@ def render_online_tools():
             )
             
             if uploaded_file is not None:
-                # 图像预览
+                # 读取并转换图像
                 image = Image.open(uploaded_file)
-                st.image(image, caption="📷 上传的图像预览", use_container_width=True)
+                image_np = np.array(image)
+                
+                # 转换图像格式
+                if len(image_np.shape) == 2:
+                    # 灰度图转BGR
+                    image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+                elif image_np.shape[2] == 4:
+                    # RGBA转BGR
+                    image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2BGR)
+                elif image_np.shape[2] == 3:
+                    # RGB转BGR
+                    image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+                
+                # 显示彩色图像
+                display_img = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+                st.image(display_img, caption="📷 上传的彩色图像", use_container_width=True)
                 
                 # 滤波器类型选择
                 filter_type = st.selectbox(
@@ -2251,58 +2254,52 @@ def render_online_tools():
                     help="核大小必须是奇数，值越大平滑效果越强"
                 )
                 
-                # 显示核大小说明
-                if kernel_size == 3:
-                    st.caption("小核：轻微平滑，保留细节")
-                elif kernel_size == 5:
-                    st.caption("中等核：适中平滑，平衡细节与降噪")
-                elif kernel_size == 7:
-                    st.caption("大核：强平滑，可能模糊细节")
-                else:
-                    st.caption("超大核：极强平滑，适用于严重噪声")
+                # 高斯滤波专用参数
+                sigma = 1.0
+                if filter_type == "高斯滤波":
+                    sigma = st.slider(
+                        "高斯标准差 (σ)",
+                        min_value=0.5,
+                        max_value=5.0,
+                        value=1.0,
+                        step=0.1,
+                        key="sigma_slider",
+                        help="σ值越大，平滑效果越强"
+                    )
                 
-                # 添加噪声选项（用于演示）
-                add_noise = st.checkbox("添加随机噪声（用于演示）", value=False)
-                noise_level = 0
+                # 添加噪声选项
+                add_noise = st.checkbox("添加随机噪声（用于演示）", value=True, key="filter_noise_check")
+                noise_type = "gaussian"
+                noise_level = 30
                 if add_noise:
-                    noise_level = st.slider("噪声强度", 10, 50, 20, key="noise_level")
+                    noise_type = st.selectbox("噪声类型", ["gaussian", "salt_pepper", "speckle"], 
+                                           key="filter_noise_type")
+                    noise_level = st.slider("噪声强度", 10, 100, 30, key="filter_noise_level")
                 
                 # 处理按钮
                 if st.button("🚀 执行滤波处理", key="filter_btn", use_container_width=True):
                     try:
-                        # 转换图像为numpy数组
-                        image_np = np.array(image)
-                        
-                        # 确保是3通道图像
-                        if len(image_np.shape) == 2:
-                            # 灰度图转BGR
-                            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
-                        elif image_np.shape[2] == 4:
-                            # RGBA转BGR
-                            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2BGR)
-                        elif image_np.shape[2] == 3:
-                            # RGB转BGR
-                            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
-                        
-                        # 添加噪声（如果选择了）
-                        noisy_img = image_np.copy()
-                        if add_noise and noise_level > 0:
-                            noise = np.random.randint(-noise_level, noise_level, image_np.shape)
-                            noisy_img = np.clip(image_np.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-                        
-                        # 执行滤波处理
                         with st.spinner(f"正在应用{filter_type}..."):
-                            filter_result = apply_filter(noisy_img, filter_type, kernel_size)
-                        
-                        # 保存结果到session_state
-                        st.session_state['filter_original'] = image_np
-                        st.session_state['filter_noisy'] = noisy_img if add_noise else None
-                        st.session_state['filter_result'] = filter_result
-                        st.session_state['filter_type'] = filter_type
-                        st.session_state['filter_kernel'] = kernel_size
-                        
-                        st.success(f"✅ {filter_type}完成！")
-                        
+                            # 添加噪声
+                            noisy_img = image_np.copy()
+                            if add_noise:
+                                noisy_img = add_noise_to_image(noisy_img, noise_type, noise_level)
+                            
+                            # 执行滤波处理
+                            filter_result = apply_filter(noisy_img, filter_type, kernel_size, sigma)
+                            
+                            # 保存结果到session_state
+                            st.session_state['filter_original'] = image_np
+                            st.session_state['filter_noisy'] = noisy_img
+                            st.session_state['filter_result'] = filter_result
+                            st.session_state['filter_type'] = filter_type
+                            st.session_state['filter_kernel'] = kernel_size
+                            st.session_state['filter_sigma'] = sigma
+                            st.session_state['noise_type'] = noise_type
+                            st.session_state['noise_level'] = noise_level
+                            
+                            st.success(f"✅ {filter_type}完成！")
+                            
                     except Exception as e:
                         st.error(f"滤波处理失败: {str(e)}")
             
@@ -2311,24 +2308,27 @@ def render_online_tools():
                 
                 # 示例图像
                 if st.button("📸 使用示例图像", key="filter_example_btn", use_container_width=True):
-                    # 创建示例图像（带纹理的渐变）
-                    example_img = np.zeros((200, 300, 3), dtype=np.uint8)
+                    # 创建示例图像（彩色）
+                    example_img = np.zeros((300, 400, 3), dtype=np.uint8)
                     
                     # 创建渐变
                     for i in range(3):
-                        example_img[:, :, i] = np.linspace(0, 255, 300).astype(np.uint8)
+                        example_img[:, :, i] = np.linspace(0, 255, 400).astype(np.uint8)
                     
                     # 添加一些纹理
                     example_img = example_img.astype(np.float32)
-                    example_img += np.random.randn(200, 300, 3) * 30
+                    example_img += np.random.randn(300, 400, 3) * 30
                     example_img = np.clip(example_img, 0, 255).astype(np.uint8)
                     
                     # 保存到session_state
                     st.session_state['filter_original'] = example_img
-                    st.session_state['filter_result'] = apply_filter(example_img, "高斯滤波", 5)
+                    st.session_state['filter_noisy'] = add_noise_to_image(example_img, "gaussian", 40)
+                    st.session_state['filter_result'] = apply_filter(st.session_state['filter_noisy'], "高斯滤波", 5, 1.0)
                     st.session_state['filter_type'] = "高斯滤波"
                     st.session_state['filter_kernel'] = 5
-                    st.session_state['using_example_filter'] = True
+                    st.session_state['filter_sigma'] = 1.0
+                    st.session_state['noise_type'] = "gaussian"
+                    st.session_state['noise_level'] = 40
                     
                     st.success("✅ 已加载示例图像")
         
@@ -2337,60 +2337,63 @@ def render_online_tools():
             st.markdown("### 📊 处理结果")
             
             if 'filter_original' in st.session_state and 'filter_result' in st.session_state:
-                # 显示对比结果
                 filter_type = st.session_state.get('filter_type', '滤波')
                 kernel_size = st.session_state.get('filter_kernel', 3)
+                sigma = st.session_state.get('filter_sigma', 1.0)
                 
-                # 如果有噪声图像，显示噪声图像和滤波结果对比
-                if 'filter_noisy' in st.session_state and st.session_state['filter_noisy'] is not None:
-                    # 显示噪声图像和滤波结果
-                    col_noisy, col_filtered = st.columns(2)
-                    
-                    with col_noisy:
-                        noisy_img = st.session_state['filter_noisy']
-                        if len(noisy_img.shape) == 3:
-                            display_noisy = cv2.cvtColor(noisy_img, cv2.COLOR_BGR2RGB)
-                        else:
-                            display_noisy = noisy_img
-                        st.image(display_noisy, caption="📈 添加噪声后的图像", use_container_width=True)
-                    
-                    with col_filtered:
-                        filter_img = st.session_state['filter_result']
-                        if len(filter_img.shape) == 3:
-                            display_filtered = cv2.cvtColor(filter_img, cv2.COLOR_BGR2RGB)
-                        else:
-                            display_filtered = filter_img
-                        st.image(display_filtered, 
-                                caption=f"✨ {filter_type}结果 ({kernel_size}×{kernel_size})", 
-                                use_container_width=True)
+                # 显示三幅图像对比
+                col_orig, col_noisy, col_filtered = st.columns(3)
                 
-                else:
-                    # 显示原始图像和滤波结果对比
-                    display_image_comparison(
-                        st.session_state['filter_original'],
-                        st.session_state['filter_result'],
-                        original_title="原始图像",
-                        processed_title=f"{filter_type}结果 ({kernel_size}×{kernel_size})"
-                    )
+                with col_orig:
+                    display_orig = cv2.cvtColor(st.session_state['filter_original'], cv2.COLOR_BGR2RGB)
+                    st.image(display_orig, caption="📷 原始图像", use_container_width=True)
+                
+                with col_noisy:
+                    display_noisy = cv2.cvtColor(st.session_state['filter_noisy'], cv2.COLOR_BGR2RGB)
+                    st.image(display_noisy, caption="📈 添加噪声后", use_container_width=True)
+                
+                with col_filtered:
+                    display_filtered = cv2.cvtColor(st.session_state['filter_result'], cv2.COLOR_BGR2RGB)
+                    caption = f"✨ {filter_type}结果"
+                    if filter_type == "高斯滤波":
+                        caption += f" ({kernel_size}×{kernel_size}, σ={sigma})"
+                    else:
+                        caption += f" ({kernel_size}×{kernel_size})"
+                    st.image(display_filtered, caption=caption, use_container_width=True)
+                
+                # 噪声信息
+                if 'noise_type' in st.session_state:
+                    st.info(f"**噪声类型:** {st.session_state['noise_type']} | **噪声强度:** {st.session_state.get('noise_level', 0)}")
                 
                 # 下载按钮
-                col_a, col_b = st.columns(2)
-                with col_a:
+                st.markdown("---")
+                col_dl1, col_dl2, col_dl3 = st.columns(3)
+                
+                with col_dl1:
                     # 下载原始图像
                     original_filename = "original_image.jpg"
                     st.markdown(get_image_download_link(
                         st.session_state['filter_original'],
                         original_filename,
-                        "📥 下载原始图像"
+                        "📥 原始图"
                     ), unsafe_allow_html=True)
                 
-                with col_b:
-                    # 下载处理结果
+                with col_dl2:
+                    # 下载噪声图像
+                    noisy_filename = "noisy_image.jpg"
+                    st.markdown(get_image_download_link(
+                        st.session_state['filter_noisy'],
+                        noisy_filename,
+                        "📥 噪声图"
+                    ), unsafe_allow_html=True)
+                
+                with col_dl3:
+                    # 下载滤波结果
                     result_filename = f"filter_{filter_type}_{kernel_size}x{kernel_size}.jpg"
                     st.markdown(get_image_download_link(
                         st.session_state['filter_result'],
                         result_filename,
-                        "📥 下载处理结果"
+                        "📥 滤波结果"
                     ), unsafe_allow_html=True)
                 
                 # 技术指标
@@ -2413,153 +2416,27 @@ def render_online_tools():
                         st.metric("图像尺寸", "不匹配")
                 
                 with col_metrics2:
-                    # 计算平滑度
-                    original_grad = np.gradient(original_img.astype(float))
-                    result_grad = np.gradient(result_img.astype(float))
+                    # 计算平滑度提升
+                    original_gray = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
+                    result_gray = cv2.cvtColor(result_img, cv2.COLOR_BGR2GRAY)
                     
-                    original_var = np.var(original_grad[0]) + np.var(original_grad[1])
-                    result_var = np.var(result_grad[0]) + np.var(result_grad[1])
+                    original_laplacian = cv2.Laplacian(original_gray, cv2.CV_64F).var()
+                    result_laplacian = cv2.Laplacian(result_gray, cv2.CV_64F).var()
                     
-                    smoothness = ((original_var - result_var) / original_var) * 100
-                    st.metric("平滑度提升", f"{smoothness:.1f}%")
+                    if original_laplacian > 0:
+                        smoothness_improvement = ((original_laplacian - result_laplacian) / original_laplacian) * 100
+                        st.metric("平滑度提升", f"{smoothness_improvement:.1f}%")
+                    else:
+                        st.metric("平滑度提升", "N/A")
                 
                 with col_metrics3:
-                    # 计算处理时间（模拟）
-                    processing_time = kernel_size * 0.5 + 0.1
-                    st.metric("估计处理时间", f"{processing_time:.1f} ms")
+                    # 显示核大小信息
+                    st.metric("核大小", f"{kernel_size}×{kernel_size}")
+                    if filter_type == "高斯滤波":
+                        st.metric("标准差σ", f"{sigma:.1f}")
             
             else:
                 st.info("👈 请先在左侧上传图像并点击处理按钮")
-                
-                # 显示示例说明
-                st.markdown("""
-                <div style='background: linear-gradient(135deg, #fef3c7, #fde68a); 
-                            padding: 20px; border-radius: 12px; margin-top: 20px;'>
-                    <h4>💡 使用说明</h4>
-                    <ol>
-                        <li>在左侧上传或选择一张图像</li>
-                        <li>选择滤波器类型和核大小</li>
-                        <li>可以选择添加噪声以观察滤波效果</li>
-                        <li>点击"执行滤波处理"按钮</li>
-                        <li>查看并比较处理前后的图像</li>
-                        <li>可以下载处理结果</li>
-                    </ol>
-                    <p><strong>教学提示：</strong>不同滤波器和核大小对图像平滑效果的影响，
-                    尝试调整参数观察效果变化。</p>
-                </div>
-                """, unsafe_allow_html=True)     
-
-def apply_edge_detection_with_params(image, operator, params):
-    """
-    应用带参数的边缘检测算子
-    """
-    # 确保输入是灰度图
-    if len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    threshold = params.get('threshold', 30)
-    result_dict = {}
-    
-    try:
-        if operator == "Roberts":
-            # Roberts算子 - 固定2×2
-            kernel_x = np.array([[1, 0], [0, -1]])
-            kernel_y = np.array([[0, 1], [-1, 0]])
-            roberts_x = cv2.filter2D(image, cv2.CV_64F, kernel_x)
-            roberts_y = cv2.filter2D(image, cv2.CV_64F, kernel_y)
-            edges = np.sqrt(roberts_x**2 + roberts_y**2)
-            edges = np.clip(edges, 0, 255).astype(np.uint8)
-            result_dict['edges'] = edges
-            result_dict['grad_x'] = roberts_x
-            result_dict['grad_y'] = roberts_y
-        
-        elif operator == "Sobel":
-            # Sobel算子
-            kernel_size = params.get('kernel_size', 3)
-            sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=kernel_size)
-            sobely = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=kernel_size)
-            edges = cv2.magnitude(sobelx, sobely)
-            edges = np.clip(edges, 0, 255).astype(np.uint8)
-            result_dict['edges'] = edges
-            result_dict['grad_x'] = sobelx
-            result_dict['grad_y'] = sobely
-            
-            # 计算梯度方向
-            if params.get('show_direction', False):
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    direction = np.arctan2(sobely, sobelx)
-                    direction = np.nan_to_num(direction, nan=0.0)
-                result_dict['direction'] = direction
-        
-        elif operator == "Prewitt":
-            # Prewitt算子
-            kernel_size = 3  # Prewitt通常是3×3
-            kernel_x = np.array([[1, 0, -1], [1, 0, -1], [1, 0, -1]])
-            kernel_y = np.array([[1, 1, 1], [0, 0, 0], [-1, -1, -1]])
-            prewitt_x = cv2.filter2D(image, cv2.CV_64F, kernel_x)
-            prewitt_y = cv2.filter2D(image, cv2.CV_64F, kernel_y)
-            edges = cv2.magnitude(prewitt_x, prewitt_y)
-            edges = np.clip(edges, 0, 255).astype(np.uint8)
-            result_dict['edges'] = edges
-            result_dict['grad_x'] = prewitt_x
-            result_dict['grad_y'] = prewitt_y
-            
-            # 计算梯度方向
-            if params.get('show_direction', False):
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    direction = np.arctan2(prewitt_y, prewitt_x)
-                    direction = np.nan_to_num(direction, nan=0.0)
-                result_dict['direction'] = direction
-        
-        elif operator == "Laplacian":
-            # Laplacian算子
-            kernel_size = params.get('kernel_size', 3)
-            # 根据核大小选择适当的Laplacian
-            if kernel_size == 3:
-                edges = cv2.Laplacian(image, cv2.CV_64F, ksize=3)
-            else:
-                edges = cv2.Laplacian(image, cv2.CV_64F, ksize=5)
-            edges = np.abs(edges)
-            edges = np.clip(edges, 0, 255).astype(np.uint8)
-            result_dict['edges'] = edges
-        
-        elif operator == "LoG":
-            # LoG算子（高斯-拉普拉斯）
-            kernel_size = params.get('log_kernel', 5)
-            sigma = params.get('sigma', 1.0)
-            blurred = cv2.GaussianBlur(image, (kernel_size, kernel_size), sigma)
-            edges = cv2.Laplacian(blurred, cv2.CV_64F)
-            edges = np.abs(edges)
-            edges = np.clip(edges, 0, 255).astype(np.uint8)
-            result_dict['edges'] = edges
-        
-        elif operator == "Canny":
-            # Canny算子
-            threshold1 = params.get('threshold1', 50)
-            threshold2 = params.get('threshold2', 150)
-            blur_kernel = params.get('blur_kernel', 5)
-            
-            # 先进行高斯平滑
-            blurred = cv2.GaussianBlur(image, (blur_kernel, blur_kernel), 0)
-            edges = cv2.Canny(blurred, threshold1, threshold2)
-            result_dict['edges'] = edges
-        
-        else:
-            result_dict['edges'] = image
-        
-        # 应用阈值（对于非Canny算子）
-        if operator != "Canny":
-            edges = result_dict['edges']
-            # 创建二值化边缘图
-            _, binary_edges = cv2.threshold(edges, threshold, 255, cv2.THRESH_BINARY)
-            result_dict['edges'] = binary_edges
-    
-    except Exception as e:
-        st.error(f"应用{operator}算子时出错: {str(e)}")
-        # 返回原始图像作为fallback
-        result_dict['edges'] = image
-    
-    return result_dict
 
 # 主页面内容
 def main():
