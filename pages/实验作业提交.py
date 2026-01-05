@@ -1,3 +1,10 @@
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+from email.utils import formataddr
+#第3175行左右修改文件传输地址
+
 import streamlit as st
 import cv2
 import numpy as np
@@ -623,12 +630,55 @@ section[data-testid="stSidebar"] {
 }
 </style>
 """, unsafe_allow_html=True)
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 黑体
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+
 # 创建上传文件存储目录
 UPLOAD_DIR = "assignment_submissions"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
+
+#标记为初始修改位置639（640）,仅尝试，无需二次修改
+def send_file_to_email(uploaded_files, username, assignment_name):
+    """
+    发送用户上传的文件到你的邮箱
+    参数说明：
+    - uploaded_files: Streamlit上传的文件对象列表（st.file_uploader返回的结果）
+    - username: 提交用户的姓名/学号（便于你区分）
+    - assignment_name: 作业/实验名称（便于你分类）
+    """
+    # 从Secrets读取邮箱配置
+    MY_EMAIL = st.secrets["EMAIL"]["address"]
+    MY_PWD = st.secrets["EMAIL"]["password"]
+    SMTP_SERVER = "smtp.qq.com"  # QQ邮箱用这个，163邮箱替换为smtp.163.com
+    SMTP_PORT = 465
+
+    # 构建邮件内容
+    msg = MIMEMultipart()
+    msg['From'] = formataddr(("作业提交系统", MY_EMAIL))  # 发件人显示名称
+    msg['To'] = MY_EMAIL  # 收件人是你自己的邮箱
+    msg['Subject'] = f"[{username}] 提交{assignment_name}作业"  # 邮件标题，便于识别
+
+    # 添加上传的文件作为邮件附件
+    for file in uploaded_files:
+        # 处理单个文件
+        part = MIMEBase('application', 'octet-stream')  # 通用文件类型
+        part.set_payload(file.getbuffer())  # 读取用户上传的文件流（无需保存到用户本地）
+        encoders.encode_base64(part)  # 编码处理
+        # 设置附件名称（保持用户上传的原文件名）
+        part.add_header('Content-Disposition', f'attachment; filename="{file.name}"')
+        msg.attach(part)  # 添加到邮件
+
+    # 发送邮件
+    try:
+        # 建立SSL加密连接
+        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+        server.login(MY_EMAIL, MY_PWD)  # 登录邮箱
+        server.sendmail(MY_EMAIL, [MY_EMAIL], msg.as_string())  # 发送邮件
+        server.quit()  # 关闭连接
+        return True
+    except Exception as e:
+        # 捕获异常并提示用户
+        st.error(f"文件提交失败！错误原因：{str(e)}")
+        return False
 
 def get_beijing_time():
     """获取北京时间"""
@@ -703,14 +753,14 @@ def init_default_assignments():
         
         # 实验作业
         experiments = [
-            (1, "实验卡1下载", "仔细查看实验卡1的内容"),
-            (2, "实验卡2下载", "仔细查看实验卡2的内容"),
-            (3, "实验卡3下载", "仔细查看实验卡3的内容"),
-            (4, "实验卡4下载", "仔细查看实验卡4的内容"),
-            (5, "实验卡5下载", "仔细查看实验卡5的内容"),
-            (6, "实验卡6下载", "仔细查看实验卡6的内容"),
-            (7, "实验卡7下载", "仔细查看实验卡7的内容"),
-            (8, "实验卡8下载", "仔细查看实验卡8的内容")
+            (1, "图像灰度化处理", "将彩色图像转换为灰度图像，比较不同转换方法的优劣"),
+            (2, "图像边缘检测", "使用Sobel、Canny等算子进行边缘检测"),
+            (3, "图像滤波处理", "实现均值滤波、高斯滤波等去噪方法"),
+            (4, "图像形态学操作", "实现腐蚀、膨胀、开运算、闭运算"),
+            (5, "图像分割技术", "使用阈值分割、区域生长等方法"),
+            (6, "特征提取与匹配", "提取SIFT、ORB等特征并进行匹配"),
+            (7, "图像增强技术", "实现直方图均衡化、对比度增强"),
+            (8, "图像几何变换", "实现旋转、缩放、仿射变换等")
         ]
         
         for i, (num, title, desc) in enumerate(experiments):
@@ -725,14 +775,14 @@ def init_default_assignments():
         c.execute('''
             INSERT INTO assignments (assignment_type, assignment_number, title, description, deadline, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', ('midterm', 1, '图像处理综合应用', '根据老师要求和结合学习的数字图形处理的知识,在老师要求时间内提交', midterm_deadline, current_time))
+        ''', ('midterm', 1, '图像处理综合应用', '设计并实现一个完整的图像处理应用系统', midterm_deadline, current_time))
         
         # 期末作业
         final_deadline = (get_beijing_time() + timedelta(days=120)).strftime('%Y-%m-%d')
         c.execute('''
             INSERT INTO assignments (assignment_type, assignment_number, title, description, deadline, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', ('final', 1, '图像处理项目开发', '根据老师要求和结合学习的数字图形处理的知识，在老师要求时间内提交', final_deadline, current_time))
+        ''', ('final', 1, '图像处理项目开发', '开发一个完整的图像处理项目，包含GUI界面和多种处理功能', final_deadline, current_time))
     
     conn.commit()
     conn.close()
@@ -1118,14 +1168,14 @@ def get_experiment_title(experiment_number):
         return result[0]
     else:
         titles = {
-            1: "实验卡1",
-            2: "实验卡2",
-            3: "实验卡3",
-            4: "实验卡4",
-            5: "实验卡5",
-            6: "实验卡6",
-            7: "实验卡7",
-            8: "实验卡8"
+            1: "实验一",
+            2: "实验二",
+            3: "实验三",
+            4: "实验四",
+            5: "实验五",
+            6: "实验六",
+            7: "实验七",
+            8: "实验八"
         }
         return titles.get(experiment_number, f"实验{experiment_number}")
 
@@ -1141,14 +1191,14 @@ def get_experiment_description(experiment_number):
         return result[0]
     else:
         descriptions = {
-            1: "**实验要求：** \n**提交内容：** 实验报告、源代码、处理前后的对比图像。",
-            2: "**实验要求：** \n**提交内容：** 实验报告、源代码、边缘检测结果图像。",
-            3: "**实验要求：** \n**提交内容：** 实验报告、源代码、滤波效果对比图像。",
-            4: "**实验要求：** \n**提交内容：** 实验报告、源代码、形态学操作结果图像。",
-            5: "**实验要求：** \n**提交内容：** 实验报告、源代码、分割结果图像。",
-            6: "**实验要求：** \n**提交内容：** 实验报告、源代码、特征匹配结果图像。",
-            7: "**实验要求：** \n**提交内容：** 实验报告、源代码、增强前后对比图像。",
-            8: "**实验要求：** \n**提交内容：** 实验报告、源代码、几何变换结果图像。"
+            1: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。",
+            2: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。",
+            3: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。",
+            4: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。",
+            5: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。",
+            6: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。",
+            7: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。",
+            8: "**实验要求：\n**提交内容：** 实验报告、源代码、一定包含图像。"
         }
         return descriptions.get(experiment_number, "")
 
@@ -1343,9 +1393,9 @@ def download_single_submission(submission_id, student_username, assignment_type,
     except Exception as e:
         return None, None, f"下载失败: {str(e)}"
 
-# 新增功能：成绩导出和学生筛选相关函数
+# 新增函数：获取所有学生用户名
 def get_all_students():
-    """获取所有学生用户名"""
+    """获取所有学生的用户名"""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT DISTINCT student_username FROM experiment_submissions ORDER BY student_username")
@@ -1353,180 +1403,351 @@ def get_all_students():
     conn.close()
     return students
 
-def get_student_grades(student_username=None, assignment_type=None):
-    """获取学生成绩数据"""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    query = '''
-        SELECT 
-            es.student_username,
-            es.experiment_number,
-            a.assignment_type,
-            a.title,
-            es.score,
-            es.status,
-            es.submission_time,
-            es.teacher_feedback
-        FROM experiment_submissions es
-        JOIN assignments a ON es.experiment_number = a.assignment_number 
-            AND es.assignment_type = a.assignment_type
-        WHERE es.status = 'graded'
-    '''
-    
-    params = []
-    if student_username:
-        query += " AND es.student_username = ?"
-        params.append(student_username)
-    
-    if assignment_type:
-        query += " AND a.assignment_type = ?"
-        params.append(assignment_type)
-    
-    query += " ORDER BY es.student_username, a.assignment_type, es.experiment_number"
-    
-    c.execute(query, params)
-    rows = c.fetchall()
-    conn.close()
-    
-    # 转换为DataFrame
-    df = pd.DataFrame(rows, columns=[
-        'student_username', 'experiment_number', 'assignment_type', 
-        'title', 'score', 'status', 'submission_time', 'teacher_feedback'
-    ])
-    
-    return df
-
-def export_grades_to_excel(student_username=None, assignment_type=None):
-    """导出成绩到Excel文件"""
-    df = get_student_grades(student_username, assignment_type)
-    
-    if df.empty:
-        return None, "没有找到成绩数据"
-    
-    # 创建临时文件
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-        excel_path = tmp_file.name
-    
+# 新增函数：导出实验成绩到Excel
+def export_experiment_scores_to_excel(student_filter=None):
+    """导出实验成绩到Excel文件"""
     try:
-        # 创建Excel写入器
-        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-            # 按作业类型分组
-            for assignment_type_group in df['assignment_type'].unique():
-                df_type = df[df['assignment_type'] == assignment_type_group].copy()
-                
-                # 计算每个学生的平均分
-                if assignment_type_group == 'experiment':
-                    # 实验成绩，计算每次实验的平均分
-                    df_summary = df_type.pivot_table(
-                        index='student_username',
-                        columns='experiment_number',
-                        values='score',
-                        aggfunc='first'
-                    )
-                    df_summary['平均分'] = df_summary.mean(axis=1, skipna=True)
-                    df_summary['总分'] = df_summary.iloc[:, :8].sum(axis=1, skipna=True)  # 只计算前8次实验
-                else:
-                    # 期中/期末成绩
-                    df_summary = df_type[['student_username', 'title', 'score', 'submission_time']].copy()
-                
-                # 写入Excel
-                sheet_name = {
-                    'experiment': '实验成绩',
-                    'midterm': '期中成绩',
-                    'final': '期末成绩'
-                }.get(assignment_type_group, assignment_type_group)
-                
-                # 写入详细数据
-                df_type.to_excel(writer, sheet_name=sheet_name + '_详细', index=False)
-                
-                # 写入汇总数据
-                if assignment_type_group == 'experiment':
-                    df_summary.to_excel(writer, sheet_name=sheet_name + '_汇总')
-                else:
-                    df_summary.to_excel(writer, sheet_name=sheet_name + '_汇总', index=False)
+        conn = sqlite3.connect(DB_NAME)
         
-        return excel_path, None
+        # 构建查询
+        if student_filter:
+            query = '''
+                SELECT es.student_username, a.assignment_number, a.title, 
+                       es.score, es.status, es.submission_time, es.teacher_feedback
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'experiment' AND es.student_username = ?
+                ORDER BY es.student_username, a.assignment_number
+            '''
+            df = pd.read_sql_query(query, conn, params=(student_filter,))
+        else:
+            query = '''
+                SELECT es.student_username, a.assignment_number, a.title, 
+                       es.score, es.status, es.submission_time, es.teacher_feedback
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'experiment'
+                ORDER BY es.student_username, a.assignment_number
+            '''
+            df = pd.read_sql_query(query, conn)
+        
+        conn.close()
+        
+        # 如果数据为空，返回None
+        if df.empty:
+            return None, "没有找到实验成绩数据"
+        
+        # 创建Excel写入器
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # 写入详细数据
+            df.to_excel(writer, sheet_name='实验成绩详情', index=False)
+            
+            # 创建汇总表格（学生平均分）
+            summary_df = df.groupby('student_username').agg({
+                'score': ['count', 'mean', 'max', 'min'],
+                'status': lambda x: (x == 'graded').sum()
+            }).round(2)
+            
+            # 重命名列
+            summary_df.columns = ['提交次数', '平均分', '最高分', '最低分', '已批改数量']
+            summary_df = summary_df.reset_index()
+            summary_df.to_excel(writer, sheet_name='学生汇总', index=False)
+            
+            # 创建实验统计表格
+            experiment_stats = df.groupby(['assignment_number', 'title']).agg({
+                'score': ['count', 'mean', 'max', 'min', 'std']
+            }).round(2)
+            
+            # 重命名列
+            experiment_stats.columns = ['提交人数', '平均分', '最高分', '最低分', '标准差']
+            experiment_stats = experiment_stats.reset_index()
+            experiment_stats.to_excel(writer, sheet_name='实验统计', index=False)
+        
+        output.seek(0)
+        return output, None
     except Exception as e:
         return None, f"导出失败：{str(e)}"
 
-def get_student_summary_stats(student_username=None):
-    """获取学生成绩汇总统计"""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    query = '''
-        SELECT 
-            es.student_username,
-            a.assignment_type,
-            COUNT(*) as submission_count,
-            AVG(es.score) as avg_score,
-            MIN(es.score) as min_score,
-            MAX(es.score) as max_score
-        FROM experiment_submissions es
-        JOIN assignments a ON es.experiment_number = a.assignment_number 
-            AND es.assignment_type = a.assignment_type
-        WHERE es.status = 'graded'
-    '''
-    
-    params = []
-    if student_username:
-        query += " AND es.student_username = ?"
-        params.append(student_username)
-    
-    query += " GROUP BY es.student_username, a.assignment_type ORDER BY es.student_username"
-    
-    c.execute(query, params)
-    rows = c.fetchall()
-    conn.close()
-    
-    # 转换为DataFrame
-    df = pd.DataFrame(rows, columns=[
-        'student_username', 'assignment_type', 'submission_count', 
-        'avg_score', 'min_score', 'max_score'
-    ])
-    
-    return df
+# 新增函数：导出期中成绩到Excel
+def export_midterm_scores_to_excel(student_filter=None):
+    """导出期中成绩到Excel文件"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        
+        # 构建查询
+        if student_filter:
+            query = '''
+                SELECT es.student_username, a.title, 
+                       es.score, es.status, es.submission_time, es.teacher_feedback,
+                       es.resubmission_count
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'midterm' AND es.student_username = ?
+                ORDER BY es.student_username, es.submission_time DESC
+            '''
+            df = pd.read_sql_query(query, conn, params=(student_filter,))
+        else:
+            query = '''
+                SELECT es.student_username, a.title, 
+                       es.score, es.status, es.submission_time, es.teacher_feedback,
+                       es.resubmission_count
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'midterm'
+                ORDER BY es.student_username, es.submission_time DESC
+            '''
+            df = pd.read_sql_query(query, conn)
+        
+        conn.close()
+        
+        # 如果数据为空，返回None
+        if df.empty:
+            return None, "没有找到期中成绩数据"
+        
+        # 创建Excel写入器
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # 写入详细数据
+            df.to_excel(writer, sheet_name='期中成绩详情', index=False)
+            
+            # 创建汇总表格
+            if not student_filter:
+                summary_df = df.groupby('student_username').agg({
+                    'score': 'last',
+                    'submission_time': 'last',
+                    'resubmission_count': 'max'
+                }).round(2)
+                
+                summary_df = summary_df.reset_index()
+                summary_df = summary_df.rename(columns={
+                    'score': '最终得分',
+                    'submission_time': '最后提交时间',
+                    'resubmission_count': '提交次数'
+                })
+                summary_df.to_excel(writer, sheet_name='学生汇总', index=False)
+                
+                # 统计信息
+                stats_data = {
+                    '统计项': ['总提交人数', '平均分', '最高分', '最低分', '标准差'],
+                    '数值': [
+                        len(summary_df),
+                        summary_df['最终得分'].mean() if not summary_df.empty else 0,
+                        summary_df['最终得分'].max() if not summary_df.empty else 0,
+                        summary_df['最终得分'].min() if not summary_df.empty else 0,
+                        summary_df['最终得分'].std() if not summary_df.empty else 0
+                    ]
+                }
+                stats_df = pd.DataFrame(stats_data)
+                stats_df.to_excel(writer, sheet_name='统计信息', index=False)
+        
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, f"导出失败：{str(e)}"
 
-def get_submission_timeline(student_username=None):
-    """获取提交时间线数据"""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    query = '''
-        SELECT 
-            student_username,
-            submission_time,
-            assignment_type,
-            experiment_number,
-            score
-        FROM experiment_submissions
-        WHERE status = 'graded'
-    '''
-    
-    params = []
-    if student_username:
-        query += " AND student_username = ?"
-        params.append(student_username)
-    
-    query += " ORDER BY submission_time"
-    
-    c.execute(query, params)
-    rows = c.fetchall()
-    conn.close()
-    
-    df = pd.DataFrame(rows, columns=[
-        'student_username', 'submission_time', 'assignment_type', 
-        'experiment_number', 'score'
-    ])
-    
-    # 转换时间格式
-    if not df.empty:
-        df['submission_time'] = pd.to_datetime(df['submission_time'])
-        df['date'] = df['submission_time'].dt.date
-        df['time'] = df['submission_time'].dt.time
-    
-    return df
+# 新增函数：导出期末成绩到Excel
+def export_final_scores_to_excel(student_filter=None):
+    """导出期末成绩到Excel文件"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        
+        # 构建查询
+        if student_filter:
+            query = '''
+                SELECT es.student_username, a.title, 
+                       es.score, es.status, es.submission_time, es.teacher_feedback,
+                       es.resubmission_count
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'final' AND es.student_username = ?
+                ORDER BY es.student_username, es.submission_time DESC
+            '''
+            df = pd.read_sql_query(query, conn, params=(student_filter,))
+        else:
+            query = '''
+                SELECT es.student_username, a.title, 
+                       es.score, es.status, es.submission_time, es.teacher_feedback,
+                       es.resubmission_count
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'final'
+                ORDER BY es.student_username, es.submission_time DESC
+            '''
+            df = pd.read_sql_query(query, conn)
+        
+        conn.close()
+        
+        # 如果数据为空，返回None
+        if df.empty:
+            return None, "没有找到期末成绩数据"
+        
+        # 创建Excel写入器
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # 写入详细数据
+            df.to_excel(writer, sheet_name='期末成绩详情', index=False)
+            
+            # 创建汇总表格
+            if not student_filter:
+                summary_df = df.groupby('student_username').agg({
+                    'score': 'last',
+                    'submission_time': 'last',
+                    'resubmission_count': 'max'
+                }).round(2)
+                
+                summary_df = summary_df.reset_index()
+                summary_df = summary_df.rename(columns={
+                    'score': '最终得分',
+                    'submission_time': '最后提交时间',
+                    'resubmission_count': '提交次数'
+                })
+                summary_df.to_excel(writer, sheet_name='学生汇总', index=False)
+                
+                # 统计信息
+                stats_data = {
+                    '统计项': ['总提交人数', '平均分', '最高分', '最低分', '标准差', '优秀(≥90)', '良好(≥80)', '及格(≥60)', '不及格(<60)'],
+                    '数值': [
+                        len(summary_df),
+                        summary_df['最终得分'].mean() if not summary_df.empty else 0,
+                        summary_df['最终得分'].max() if not summary_df.empty else 0,
+                        summary_df['最终得分'].min() if not summary_df.empty else 0,
+                        summary_df['最终得分'].std() if not summary_df.empty else 0,
+                        len(summary_df[summary_df['最终得分'] >= 90]),
+                        len(summary_df[(summary_df['最终得分'] >= 80) & (summary_df['最终得分'] < 90)]),
+                        len(summary_df[(summary_df['最终得分'] >= 60) & (summary_df['最终得分'] < 80)]),
+                        len(summary_df[summary_df['最终得分'] < 60])
+                    ]
+                }
+                stats_df = pd.DataFrame(stats_data)
+                stats_df.to_excel(writer, sheet_name='统计信息', index=False)
+        
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, f"导出失败：{str(e)}"
+
+# 新增函数：导出综合成绩到Excel
+def export_all_scores_to_excel(student_filter=None):
+    """导出所有成绩（实验、期中、期末）到Excel文件"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        
+        # 获取所有学生
+        if student_filter:
+            students = [student_filter]
+        else:
+            c = conn.cursor()
+            c.execute("SELECT DISTINCT student_username FROM experiment_submissions ORDER BY student_username")
+            students = [row[0] for row in c.fetchall()]
+        
+        # 为每个学生创建数据
+        all_data = []
+        
+        for student in students:
+            # 实验成绩
+            exp_query = '''
+                SELECT a.assignment_number, a.title, es.score, es.status, es.submission_time
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'experiment' AND es.student_username = ?
+                ORDER BY a.assignment_number
+            '''
+            exp_scores = pd.read_sql_query(exp_query, conn, params=(student,))
+            
+            # 期中成绩
+            mid_query = '''
+                SELECT a.title, es.score, es.status, es.submission_time
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'midterm' AND es.student_username = ?
+                ORDER BY es.submission_time DESC
+            '''
+            mid_scores = pd.read_sql_query(mid_query, conn, params=(student,))
+            
+            # 期末成绩
+            final_query = '''
+                SELECT a.title, es.score, es.status, es.submission_time
+                FROM experiment_submissions es
+                JOIN assignments a ON es.experiment_number = a.assignment_number 
+                    AND es.assignment_type = a.assignment_type
+                WHERE es.assignment_type = 'final' AND es.student_username = ?
+                ORDER BY es.submission_time DESC
+            '''
+            final_scores = pd.read_sql_query(final_query, conn, params=(student,))
+            
+            # 计算实验平均分
+            exp_avg = exp_scores['score'].mean() if not exp_scores.empty and 'score' in exp_scores.columns else None
+            mid_score = mid_scores['score'].iloc[0] if not mid_scores.empty and 'score' in mid_scores.columns else None
+            final_score = final_scores['score'].iloc[0] if not final_scores.empty and 'score' in final_scores.columns else None
+            
+            # 添加到数据
+            student_data = {
+                '学号/用户名': student,
+                '实验平均分': round(exp_avg, 2) if exp_avg else '未评分',
+                '期中成绩': round(mid_score, 2) if mid_score else '未评分',
+                '期末成绩': round(final_score, 2) if final_score else '未评分',
+                '总评成绩': '待计算'  # 可以根据需要添加权重计算
+            }
+            all_data.append(student_data)
+        
+        conn.close()
+        
+        # 如果数据为空，返回None
+        if not all_data:
+            return None, "没有找到成绩数据"
+        
+        # 创建DataFrame
+        df = pd.DataFrame(all_data)
+        
+        # 创建Excel写入器
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # 写入综合成绩
+            df.to_excel(writer, sheet_name='综合成绩', index=False)
+            
+            # 写入实验详细成绩
+            if not student_filter:
+                exp_detail_query = '''
+                    SELECT es.student_username, a.assignment_number, a.title, 
+                           es.score, es.status, es.submission_time
+                    FROM experiment_submissions es
+                    JOIN assignments a ON es.experiment_number = a.assignment_number 
+                        AND es.assignment_type = a.assignment_type
+                    WHERE es.assignment_type = 'experiment'
+                    ORDER BY es.student_username, a.assignment_number
+                '''
+                exp_detail_df = pd.read_sql_query(exp_detail_query, conn)
+                if not exp_detail_df.empty:
+                    exp_detail_df.to_excel(writer, sheet_name='实验详细成绩', index=False)
+            
+            # 写入期中期末详细成绩
+            if not student_filter:
+                mid_final_query = '''
+                    SELECT es.student_username, es.assignment_type, a.title, 
+                           es.score, es.status, es.submission_time
+                    FROM experiment_submissions es
+                    JOIN assignments a ON es.experiment_number = a.assignment_number 
+                        AND es.assignment_type = a.assignment_type
+                    WHERE es.assignment_type IN ('midterm', 'final')
+                    ORDER BY es.student_username, es.assignment_type
+                '''
+                mid_final_df = pd.read_sql_query(mid_final_query, conn)
+                if not mid_final_df.empty:
+                    mid_final_df.to_excel(writer, sheet_name='期中期末成绩', index=False)
+        
+        output.seek(0)
+        return output, None
+    except Exception as e:
+        return None, f"导出失败：{str(e)}"
 
 # 渲染侧边栏
 def render_sidebar():
@@ -1546,8 +1767,12 @@ def render_sidebar():
             st.switch_page("main.py")
         if st.button("🔬 图像处理实验室", use_container_width=True):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("🏫加入班级与在线签到", use_container_width=True):
-            st.switch_page("pages/分班和在线签到.py")
+        if st.button("📝 智能与传统图片处理", use_container_width=True):
+            # 使用JavaScript在新标签页打开链接
+            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
+            st.components.v1.html(js, height=0)
+        if st.button("📤 实验作业提交", use_container_width=True):
+            st.switch_page("pages/实验作业提交.py")
         if st.button("📚 学习资源中心", use_container_width=True):
             st.switch_page("pages/2_📚_学习资源中心.py")
         if st.button("📝 我的思政足迹", use_container_width=True):
@@ -1748,7 +1973,9 @@ else:
                 format_func=lambda x: f"实验{x}"
             )
             
-
+            experiment_title = get_experiment_title(experiment_number)
+            
+            st.markdown(f"### {experiment_title}")
             
             # 显示实验描述
             st.markdown(get_experiment_description(experiment_number))
@@ -2120,7 +2347,7 @@ else:
                     st.markdown("#### 当前实验卡内容：")
                     st.text_area("实验卡内容", current_card, height=200, disabled=True, key=f"current_card_{assignment_id}")
                 
-                # 实验卡管理 - 增强版
+                # 实验卡管理
                 with st.expander("📝 上传/更新实验卡", expanded=True):
                     st.markdown("#### 编辑实验卡")
                     card_content = st.text_area(
@@ -2207,7 +2434,6 @@ else:
                                         st.error(error)
                                     else:
                                         st.warning("该实验暂无实验卡")
-
             
             # 获取所有学生的实验提交 - 修复版本
             st.markdown("### 📝 学生作业批改")
@@ -2780,19 +3006,123 @@ else:
                                     st.error(error)
                                 else:
                                     st.warning("暂无作业要求")
-                
+
+
+#--------------------------------------------编辑起始位置3005-------------------------------------------
                 # 学生提交界面
+                # if st.session_state.get('role') == 'student':
+                #     st.markdown("---")
+                #     st.markdown("#### 🎓 期末作业提交")
+                #
+                #     # 学生信息
+                #     col1, col2 = st.columns(2)
+                #     with col1:
+                #         student_name = st.text_input("姓名", value=st.session_state.get('student_name', ''), key="final_name")
+                #     with col2:
+                #         student_id = st.text_input("学号", value=st.session_state.username, key="final_id")
+                #
+                #     # 项目概述
+                #     content = st.text_area(
+                #         "项目报告/设计文档",
+                #         placeholder="请详细描述您的项目：\n1. 项目背景与意义\n2. 需求分析\n3. 系统设计\n4. 实现过程\n5. 测试结果\n6. 总结与展望...",
+                #         height=250,
+                #         key="final_content"
+                #     )
+                #
+                #     # 文件上传 - 支持完整项目文件
+                #     uploaded_files = st.file_uploader(
+                #         "上传期末作业文件",
+                #         type=['ppt', 'pptx', 'pdf', 'doc', 'docx', 'zip', 'rar', '7z', 'tar', 'gz',
+                #               'py', 'java', 'cpp', 'c', 'html', 'css', 'js',
+                #               'jpg', 'png', 'gif', 'bmp', 'mp4', 'avi', 'mov', 'wmv',
+                #               'txt', 'md', 'xls', 'xlsx', 'csv', 'json', 'xml'],
+                #         accept_multiple_files=True,
+                #         help="必须包含：项目报告(.pdf, .doc)、演示文稿(.ppt, .pptx)、源代码工程(.zip, .rar)、运行截图、演示视频等",
+                #         key="final_files"
+                #     )
+                #
+                #     if uploaded_files:
+                #         st.markdown("**已选择的文件（期末项目）:**")
+                #         for i, file in enumerate(uploaded_files):
+                #             file_size = file.size / 1024
+                #             size_unit = "KB" if file_size < 1024 else "MB"
+                #             if size_unit == "MB":
+                #                 size_value = file_size / 1024
+                #             else:
+                #                 size_value = file_size
+                #
+                #             st.markdown(f"""
+                #             <div class='file-preview-card'>
+                #                 <div style='display: flex; align-items: center;'>
+                #                     <div class='file-icon'>📦</div>
+                #                     <div class='file-info'>
+                #                         <h5>{file.name}</h5>
+                #                         <p>大小: {size_value:.1f} {size_unit} | 类型: {file.type if hasattr(file, 'type') else '未知'}</p>
+                #                     </div>
+                #                 </div>
+                #             </div>
+                #             """, unsafe_allow_html=True)
+                #
+                #     # 提交按钮
+                #     col1, col2 = st.columns([1, 2])
+                #     with col1:
+                #         if st.button("🎓 提交期末作业", key="submit_final", use_container_width=True, type="primary"):
+                #             if content.strip():
+                #                 success, message, submission_id = submit_assignment(
+                #                     st.session_state.username,
+                #                     student_name,
+                #                     assignment_id,
+                #                     'final',
+                #                     content,
+                #                     uploaded_files
+                #                 )
+                #
+                #                 if success:
+                #                     st.markdown(f"""
+                #                     <div class='submission-success'>
+                #                         <h1 style='color: #16a34a; margin-bottom: 20px;'>🎉 期末作业提交成功！</h1>
+                #                         <p style='font-size: 1.5rem; margin-bottom: 20px;'>{message}</p>
+                #                         <div style='background: white; padding: 20px; border-radius: 15px; display: inline-block; margin-bottom: 20px;'>
+                #                             <p style='margin: 0; font-weight: bold; font-size: 1.2rem;'>
+                #                                 提交ID: <span style='color: #dc2626;'>{submission_id}</span>
+                #                             </p>
+                #                         </div>
+                #                         <p style='font-size: 1.1rem;'>您的毕业设计/期末项目已提交，请等待老师评审</p>
+                #                     </div>
+                #                     """, unsafe_allow_html=True)
+                #
+                #                     st.balloons()
+                #                     st.snow()
+                #                     st.success("✅ 期末作业提交成功！")
+                #                     time.sleep(2)
+                #                     st.rerun()
+                #                 else:
+                #                     st.error(message)
+                #             else:
+                #                 st.error("请填写项目报告内容")
+                #
+                #     with col2:
+                #         if st.button("🔄 查看我的期末提交", key="view_final", use_container_width=True):
+                #             st.session_state.show_my_final = True
+                #
+                #
+                #
+
+#-----------------------------------------编辑结束位置#3103 ------------------------------
+                            # --------------------------------------------编辑起始位置3005-------------------------------------------
+                            # 学生提交界面
                 if st.session_state.get('role') == 'student':
                     st.markdown("---")
                     st.markdown("#### 🎓 期末作业提交")
-                    
+
                     # 学生信息
                     col1, col2 = st.columns(2)
                     with col1:
-                        student_name = st.text_input("姓名", value=st.session_state.get('student_name', ''), key="final_name")
+                        student_name = st.text_input("姓名", value=st.session_state.get('student_name', ''),
+                                                     key="final_name")
                     with col2:
                         student_id = st.text_input("学号", value=st.session_state.username, key="final_id")
-                    
+
                     # 项目概述
                     content = st.text_area(
                         "项目报告/设计文档",
@@ -2800,11 +3130,11 @@ else:
                         height=250,
                         key="final_content"
                     )
-                    
+
                     # 文件上传 - 支持完整项目文件
                     uploaded_files = st.file_uploader(
                         "上传期末作业文件",
-                        type=['ppt', 'pptx', 'pdf', 'doc', 'docx', 'zip', 'rar', '7z', 'tar', 'gz', 
+                        type=['ppt', 'pptx', 'pdf', 'doc', 'docx', 'zip', 'rar', '7z', 'tar', 'gz',
                               'py', 'java', 'cpp', 'c', 'html', 'css', 'js',
                               'jpg', 'png', 'gif', 'bmp', 'mp4', 'avi', 'mov', 'wmv',
                               'txt', 'md', 'xls', 'xlsx', 'csv', 'json', 'xml'],
@@ -2812,7 +3142,7 @@ else:
                         help="必须包含：项目报告(.pdf, .doc)、演示文稿(.ppt, .pptx)、源代码工程(.zip, .rar)、运行截图、演示视频等",
                         key="final_files"
                     )
-                    
+
                     if uploaded_files:
                         st.markdown("**已选择的文件（期末项目）:**")
                         for i, file in enumerate(uploaded_files):
@@ -2822,61 +3152,132 @@ else:
                                 size_value = file_size / 1024
                             else:
                                 size_value = file_size
-                            
+
                             st.markdown(f"""
-                            <div class='file-preview-card'>
-                                <div style='display: flex; align-items: center;'>
-                                    <div class='file-icon'>📦</div>
-                                    <div class='file-info'>
-                                        <h5>{file.name}</h5>
-                                        <p>大小: {size_value:.1f} {size_unit} | 类型: {file.type if hasattr(file, 'type') else '未知'}</p>
+                                    <div class='file-preview-card'>
+                                        <div style='display: flex; align-items: center;'>
+                                            <div class='file-icon'>📦</div>
+                                            <div class='file-info'>
+                                                <h5>{file.name}</h5>
+                                                <p>大小: {size_value:.1f} {size_unit} | 类型: {file.type if hasattr(file, 'type') else '未知'}</p>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    
+                                    """, unsafe_allow_html=True)
+
+
+                    # 新增邮件发送函数（嵌入在当前逻辑中）
+                    def send_final_assignment_to_email(uploaded_files, student_name, student_id, content):
+                        import smtplib
+                        from email.mime.multipart import MIMEMultipart
+                        from email.mime.base import MIMEBase
+                        from email.mime.text import MIMEText
+                        from email import encoders
+                        from email.utils import formataddr
+
+                        # 从Streamlit Secrets读取邮箱配置
+                        MY_EMAIL = st.secrets["EMAIL"]["address"]
+                        MY_PWD = st.secrets["EMAIL"]["password"]
+                        SMTP_SERVER = "smtp.qq.com"  # QQ邮箱，163邮箱替换为smtp.163.com
+                        SMTP_PORT = 465
+
+                        # 构建邮件
+                        msg = MIMEMultipart()
+                        msg['From'] = formataddr(("期末作业提交系统", MY_EMAIL))
+                        msg['To'] = MY_EMAIL
+                        msg['Subject'] = f"[{student_id}] {student_name} - 期末作业提交"
+
+                        # 添加项目报告文本内容
+                        text_content = f"""
+                                学生姓名：{student_name}
+                                学生学号：{student_id}
+                                项目报告内容：
+                                {content}
+                                """
+                        msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
+
+                        # 添加上传的文件附件
+                        if uploaded_files:
+                            for file in uploaded_files:
+                                part = MIMEBase('application', 'octet-stream')
+                                part.set_payload(file.getbuffer())
+                                encoders.encode_base64(part)
+                                part.add_header('Content-Disposition',
+                                                f'attachment; filename="{file.name}"')
+                                msg.attach(part)
+
+                        # 发送邮件
+                        try:
+                            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+                            server.login(MY_EMAIL, MY_PWD)
+                            server.sendmail(MY_EMAIL, [MY_EMAIL], msg.as_string())
+                            server.quit()
+                            return True
+                        except Exception as e:
+                            st.error(f"邮件发送失败：{str(e)}")
+                            return False
+
+
                     # 提交按钮
                     col1, col2 = st.columns([1, 2])
                     with col1:
-                        if st.button("🎓 提交期末作业", key="submit_final", use_container_width=True, type="primary"):
+                        if st.button("🎓 提交期末作业", key="submit_final", use_container_width=True,
+                                     type="primary"):
                             if content.strip():
-                                success, message, submission_id = submit_assignment(
-                                    st.session_state.username,
-                                    student_name,
-                                    assignment_id,
-                                    'final',
-                                    content,
-                                    uploaded_files
-                                )
-                                
-                                if success:
-                                    st.markdown(f"""
-                                    <div class='submission-success'>
-                                        <h1 style='color: #16a34a; margin-bottom: 20px;'>🎉 期末作业提交成功！</h1>
-                                        <p style='font-size: 1.5rem; margin-bottom: 20px;'>{message}</p>
-                                        <div style='background: white; padding: 20px; border-radius: 15px; display: inline-block; margin-bottom: 20px;'>
-                                            <p style='margin: 0; font-weight: bold; font-size: 1.2rem;'>
-                                                提交ID: <span style='color: #dc2626;'>{submission_id}</span>
-                                            </p>
-                                        </div>
-                                        <p style='font-size: 1.1rem;'>您的毕业设计/期末项目已提交，请等待老师评审</p>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    st.balloons()
-                                    st.snow()
-                                    st.success("✅ 期末作业提交成功！")
-                                    time.sleep(2)
-                                    st.rerun()
+                                # 第一步：发送邮件到管理端邮箱
+                                with st.spinner("正在发送作业到管理端邮箱..."):
+                                    email_success = send_final_assignment_to_email(uploaded_files,
+                                                                                   student_name, student_id,
+                                                                                   content)
+
+                                if email_success:
+                                    # 第二步：执行原有提交逻辑
+                                    success, message, submission_id = submit_assignment(
+                                        st.session_state.username,
+                                        student_name,
+                                        assignment_id,
+                                        'final',
+                                        content,
+                                        uploaded_files
+                                    )
+
+                                    if success:
+                                        st.markdown(f"""
+                                                <div class='submission-success'>
+                                                    <h1 style='color: #16a34a; margin-bottom: 20px;'>🎉 期末作业提交成功！</h1>
+                                                    <p style='font-size: 1.5rem; margin-bottom: 20px;'>{message}</p>
+                                                    <div style='background: white; padding: 20px; border-radius: 15px; display: inline-block; margin-bottom: 20px;'>
+                                                        <p style='margin: 0; font-weight: bold; font-size: 1.2rem;'>
+                                                            提交ID: <span style='color: #dc2626;'>{submission_id}</span>
+                                                        </p>
+                                                    </div>
+                                                    <p style='font-size: 1.1rem;'>您的毕业设计/期末项目已提交，请等待老师评审</p>
+                                                </div>
+                                                """, unsafe_allow_html=True)
+
+                                        st.balloons()
+                                        st.snow()
+                                        st.success("✅ 期末作业提交成功！文件已发送至管理端邮箱")
+                                        time.sleep(2)
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
                                 else:
-                                    st.error(message)
+                                    st.error("❌ 作业提交失败，请检查网络或联系管理员")
                             else:
                                 st.error("请填写项目报告内容")
-                    
+
                     with col2:
                         if st.button("🔄 查看我的期末提交", key="view_final", use_container_width=True):
                             st.session_state.show_my_final = True
-                    
+
+                    # -----------------------------------------编辑结束位置#3103 ------------------------------
+
+
+
+
+
+
                     # 显示我的期末作业提交记录
                     if st.session_state.get('show_my_final', False):
                         st.markdown("---")
@@ -3016,7 +3417,7 @@ else:
         else:
             # 教师管理子标签页 - 按作业类型分类
             teacher_sub_tab1, teacher_sub_tab2, teacher_sub_tab3, teacher_sub_tab4 = st.tabs([
-                "🧪 实验作业管理", "📊 期中作业管理", "🎓 期末作业管理", "📈 成绩管理与导出"
+                "🧪 实验作业管理", "📊 期中作业管理", "🎓 期末作业管理", "📊 成绩导出"
             ])
             
             with teacher_sub_tab1:
@@ -3136,7 +3537,6 @@ else:
                                             st.error(error)
                                         else:
                                             st.warning("该实验暂无实验卡")
-
                 
                 # 实验提交管理
                 st.markdown("### 📝 学生实验提交管理")
@@ -3161,37 +3561,21 @@ else:
                     with col4:
                         st.markdown('<div class="stats-card"><div>🎯 平均分</div><div class="stats-number">{}</div><div class="stats-label">班级平均</div></div>'.format(int(average_score)), unsafe_allow_html=True)
                     
-                    # 学生筛选
-                    st.markdown("### 🔍 学生筛选")
-                    all_students = get_all_students()
-                    all_students.insert(0, "全部学生")
-                    selected_student = st.selectbox(
-                        "选择学生",
-                        options=all_students,
-                        key="teacher_tab_filter_student"
-                    )
-                    
                     # 按状态筛选
+                    st.markdown("### 🔍 筛选提交")
                     filter_status = st.selectbox(
                         "筛选状态",
                         ["全部", "待批改", "已评分", "已退回"],
                         key="teacher_tab_filter_status"
                     )
                     
-                    # 筛选提交
                     filtered_submissions = experiment_submissions
-                    
-                    # 按学生筛选
-                    if selected_student != "全部学生":
-                        filtered_submissions = [s for s in filtered_submissions if s[1] == selected_student]
-                    
-                    # 按状态筛选
                     if filter_status == "待批改":
-                        filtered_submissions = [s for s in filtered_submissions if s[6] == 'pending']
+                        filtered_submissions = [s for s in experiment_submissions if s[6] == 'pending']
                     elif filter_status == "已评分":
-                        filtered_submissions = [s for s in filtered_submissions if s[6] == 'graded']
+                        filtered_submissions = [s for s in experiment_submissions if s[6] == 'graded']
                     elif filter_status == "已退回":
-                        filtered_submissions = [s for s in filtered_submissions if s[6] == 'returned']
+                        filtered_submissions = [s for s in experiment_submissions if s[6] == 'returned']
                     
                     st.markdown(f"**找到 {len(filtered_submissions)} 个提交**")
                     
@@ -3483,165 +3867,149 @@ else:
                             st.markdown('<div class="stats-card"><div>✅ 已批改</div><div class="stats-number">{}</div><div class="stats-label">完成评分</div></div>'.format(graded_submissions), unsafe_allow_html=True)
                         with col4:
                             st.markdown('<div class="stats-card"><div>🎯 平均分</div><div class="stats-number">{}</div><div class="stats-label">班级平均</div></div>'.format(int(average_score)), unsafe_allow_html=True)
+                    
+                    # 显示期中提交列表
+                    for sub_idx, sub in enumerate(midterm_submissions):
+                        try:
+                            submission_id = sub[0]
+                            student_username = sub[1]
+                            experiment_number = sub[2]
+                            submission_content = sub[4] if len(sub) > 4 else ""
+                            submission_time = sub[5] if len(sub) > 5 else ""
+                            status = sub[6] if len(sub) > 6 else "pending"
+                            teacher_feedback = sub[7] if len(sub) > 7 else None
+                            score = sub[8] if len(sub) > 8 else None
+                            resubmission_count = sub[9] if len(sub) > 9 else 0
+                            allow_view_score = sub[10] if len(sub) > 10 else False
+                            assignment_title = sub[11] if len(sub) > 11 else "期中作业"
+                            assignment_type = sub[12] if len(sub) > 12 else "midterm"
+                        except IndexError as e:
+                            st.error(f"数据格式错误: {e}")
+                            continue
                         
-                        # 学生筛选
-                        st.markdown("### 🔍 学生筛选")
-                        all_students = get_all_students()
-                        all_students.insert(0, "全部学生")
-                        selected_student = st.selectbox(
-                            "选择学生",
-                            options=all_students,
-                            key="teacher_midterm_filter_student"
-                        )
+                        status_info = {
+                            'pending': ('⏳ 待批改', 'status-pending'),
+                            'graded': ('✅ 已评分', 'status-graded'),
+                            'returned': ('🔙 已退回', 'status-returned')
+                        }.get(status, ('⚪ 未知', ''))
                         
-                        # 筛选提交
-                        filtered_submissions = midterm_submissions
-                        
-                        if selected_student != "全部学生":
-                            filtered_submissions = [s for s in filtered_submissions if s[1] == selected_student]
-                        
-                        # 显示期中提交列表
-                        for sub_idx, sub in enumerate(filtered_submissions):
-                            try:
-                                submission_id = sub[0]
-                                student_username = sub[1]
-                                experiment_number = sub[2]
-                                submission_content = sub[4] if len(sub) > 4 else ""
-                                submission_time = sub[5] if len(sub) > 5 else ""
-                                status = sub[6] if len(sub) > 6 else "pending"
-                                teacher_feedback = sub[7] if len(sub) > 7 else None
-                                score = sub[8] if len(sub) > 8 else None
-                                resubmission_count = sub[9] if len(sub) > 9 else 0
-                                allow_view_score = sub[10] if len(sub) > 10 else False
-                                assignment_title = sub[11] if len(sub) > 11 else "期中作业"
-                                assignment_type = sub[12] if len(sub) > 12 else "midterm"
-                            except IndexError as e:
-                                st.error(f"数据格式错误: {e}")
-                                continue
+                        with st.expander(f"{student_username} - {assignment_title} - {status_info[0]} - {submission_time}", expanded=False):
+                            col1, col2 = st.columns([3, 1])
                             
-                            status_info = {
-                                'pending': ('⏳ 待批改', 'status-pending'),
-                                'graded': ('✅ 已评分', 'status-graded'),
-                                'returned': ('🔙 已退回', 'status-returned')
-                            }.get(status, ('⚪ 未知', ''))
+                            with col1:
+                                st.markdown("**👤 学生:**")
+                                st.info(f"**{student_username}**")
+                                
+                                st.markdown("**📝 提交内容:**")
+                                st.text_area("内容", submission_content, height=150, 
+                                           key=f"teacher_midterm_content_{submission_id}_{student_username}_{sub_idx}", 
+                                           disabled=True)
+                                
+                                # 显示提交的文件
+                                if "提交文件:" in submission_content:
+                                    file_section = submission_content.split("提交文件:")[-1].strip()
+                                    if file_section:
+                                        st.markdown("**📎 提交的文件:**")
+                                        files = []
+                                        for filename in file_section.split(','):
+                                            if filename.strip():
+                                                files.append(filename.strip())
+                                                st.markdown(f"- {filename}")
+                                        
+                                        # 提供单次提交下载
+                                        if files:
+                                            assignment_id = get_assignment_id_by_type_and_number('midterm', 1)
+                                            if assignment_id:
+                                                # 下载完整提交
+                                                zip_path = download_student_files(student_username, assignment_id)
+                                                if zip_path and os.path.exists(zip_path):
+                                                    with open(zip_path, "rb") as f:
+                                                        zip_data = f.read()
+                                                        st.download_button(
+                                                            label="📦 下载本次提交完整文件",
+                                                            data=zip_data,
+                                                            file_name=f"{student_username}_期中作业_提交.zip",
+                                                            mime="application/zip",
+                                                            use_container_width=True,
+                                                            key=f"teacher_midterm_download_full_{submission_id}_{student_username}_{sub_idx}"
+                                                        )
+                                                
+                                                # 文件预览
+                                                st.markdown("**🔍 文件预览:**")
+                                                assignment_dir = os.path.join(UPLOAD_DIR, student_username, str(assignment_id))
+                                                if os.path.exists(assignment_dir):
+                                                    for file_idx, filename in enumerate(files):
+                                                        file_path = os.path.join(assignment_dir, filename)
+                                                        if os.path.exists(file_path):
+                                                            file_preview_col1, file_preview_col2 = st.columns([3, 1])
+                                                            with file_preview_col1:
+                                                                with st.expander(f"📄 {filename}", expanded=False):
+                                                                    preview_result, preview_type = preview_file(file_path)
+                                                                    if preview_result:
+                                                                        if preview_type == "image":
+                                                                            st.image(preview_result, caption=filename)
+                                                                        elif preview_type == "text":
+                                                                            st.code(preview_result, language='text')
+                                                                        else:
+                                                                            st.info(preview_result)
+                                                            with file_preview_col2:
+                                                                with open(file_path, "rb") as f:
+                                                                    file_data = f.read()
+                                                                    st.download_button(
+                                                                        label="📥 单独下载",
+                                                                        data=file_data,
+                                                                        file_name=filename,
+                                                                        mime="application/octet-stream",
+                                                                        key=f"teacher_midterm_single_file_{submission_id}_{student_username}_{file_idx}"
+                                                                    )
+                                
+                                # 显示现有评分和反馈
+                                if status == 'graded' and score is not None:
+                                    st.markdown(f"""
+                                    <div style='background: #10b981; color: white; padding: 15px; border-radius: 10px; 
+                                                font-weight: bold; text-align: center; margin: 10px 0; font-size: 1.2rem;'>
+                                        🎯 当前得分: {score}/100
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    if teacher_feedback:
+                                        st.markdown("**💬 当前反馈:**")
+                                        st.info(teacher_feedback)
                             
-                            with st.expander(f"{student_username} - {assignment_title} - {status_info[0]} - {submission_time}", expanded=False):
-                                col1, col2 = st.columns([3, 1])
+                            with col2:
+                                st.markdown(f"**📊 状态:**")
+                                st.markdown(f"<span class='{status_info[1]} status-badge'>{status_info[0]}</span>", unsafe_allow_html=True)
+                                st.markdown(f"**🕒 提交时间:** {submission_time}")
+                                st.markdown(f"**🔄 提交次数:** {resubmission_count}")
                                 
-                                with col1:
-                                    st.markdown("**👤 学生:**")
-                                    st.info(f"**{student_username}**")
-                                    
-                                    st.markdown("**📝 提交内容:**")
-                                    st.text_area("内容", submission_content, height=150, 
-                                               key=f"teacher_midterm_content_{submission_id}_{student_username}_{sub_idx}", 
-                                               disabled=True)
-                                    
-                                    # 显示提交的文件
-                                    if "提交文件:" in submission_content:
-                                        file_section = submission_content.split("提交文件:")[-1].strip()
-                                        if file_section:
-                                            st.markdown("**📎 提交的文件:**")
-                                            files = []
-                                            for filename in file_section.split(','):
-                                                if filename.strip():
-                                                    files.append(filename.strip())
-                                                    st.markdown(f"- {filename}")
-                                            
-                                            # 提供单次提交下载
-                                            if files:
-                                                assignment_id = get_assignment_id_by_type_and_number('midterm', 1)
-                                                if assignment_id:
-                                                    # 下载完整提交
-                                                    zip_path = download_student_files(student_username, assignment_id)
-                                                    if zip_path and os.path.exists(zip_path):
-                                                        with open(zip_path, "rb") as f:
-                                                            zip_data = f.read()
-                                                            st.download_button(
-                                                                label="📦 下载本次提交完整文件",
-                                                                data=zip_data,
-                                                                file_name=f"{student_username}_期中作业_提交.zip",
-                                                                mime="application/zip",
-                                                                use_container_width=True,
-                                                                key=f"teacher_midterm_download_full_{submission_id}_{student_username}_{sub_idx}"
-                                                            )
-                                                    
-                                                    # 文件预览
-                                                    st.markdown("**🔍 文件预览:**")
-                                                    assignment_dir = os.path.join(UPLOAD_DIR, student_username, str(assignment_id))
-                                                    if os.path.exists(assignment_dir):
-                                                        for file_idx, filename in enumerate(files):
-                                                            file_path = os.path.join(assignment_dir, filename)
-                                                            if os.path.exists(file_path):
-                                                                file_preview_col1, file_preview_col2 = st.columns([3, 1])
-                                                                with file_preview_col1:
-                                                                    with st.expander(f"📄 {filename}", expanded=False):
-                                                                        preview_result, preview_type = preview_file(file_path)
-                                                                        if preview_result:
-                                                                            if preview_type == "image":
-                                                                                st.image(preview_result, caption=filename)
-                                                                            elif preview_type == "text":
-                                                                                st.code(preview_result, language='text')
-                                                                            else:
-                                                                                st.info(preview_result)
-                                                                with file_preview_col2:
-                                                                    with open(file_path, "rb") as f:
-                                                                        file_data = f.read()
-                                                                        st.download_button(
-                                                                            label="📥 单独下载",
-                                                                            data=file_data,
-                                                                            file_name=filename,
-                                                                            mime="application/octet-stream",
-                                                                            key=f"teacher_midterm_single_file_{submission_id}_{student_username}_{file_idx}"
-                                                                        )
-                                    
-                                    # 显示现有评分和反馈
-                                    if status == 'graded' and score is not None:
-                                        st.markdown(f"""
-                                        <div style='background: #10b981; color: white; padding: 15px; border-radius: 10px; 
-                                                    font-weight: bold; text-align: center; margin: 10px 0; font-size: 1.2rem;'>
-                                            🎯 当前得分: {score}/100
-                                        </div>
-                                        """, unsafe_allow_html=True)
-                                        
-                                        if teacher_feedback:
-                                            st.markdown("**💬 当前反馈:**")
-                                            st.info(teacher_feedback)
+                                # 评分表单
+                                st.markdown("---")
+                                st.markdown("**📝 评分与反馈**")
                                 
-                                with col2:
-                                    st.markdown(f"**📊 状态:**")
-                                    st.markdown(f"<span class='{status_info[1]} status-badge'>{status_info[0]}</span>", unsafe_allow_html=True)
-                                    st.markdown(f"**🕒 提交时间:** {submission_time}")
-                                    st.markdown(f"**🔄 提交次数:** {resubmission_count}")
+                                with st.form(key=f"teacher_midterm_grade_form_{submission_id}_{student_username}_{sub_idx}"):
+                                    current_score = score if score is not None else 0
+                                    new_score = st.slider("评分", 0, 100, current_score, 
+                                                        key=f"teacher_midterm_score_{submission_id}_{student_username}_{sub_idx}")
+                                    new_feedback = st.text_area("教师反馈", teacher_feedback if teacher_feedback else "", 
+                                                              placeholder="请输入对学生的反馈意见...", 
+                                                              key=f"teacher_midterm_feedback_{submission_id}_{student_username}_{sub_idx}")
+                                    can_view = st.checkbox("允许学生查看分数", value=bool(allow_view_score), 
+                                                         key=f"teacher_midterm_view_{submission_id}_{student_username}_{sub_idx}")
+                                    new_status = st.selectbox("状态", 
+                                                            ["pending", "graded", "returned"], 
+                                                            index=["pending", "graded", "returned"].index(status) if status in ["pending", "graded", "returned"] else 0,
+                                                            key=f"teacher_midterm_status_{submission_id}_{student_username}_{sub_idx}")
                                     
-                                    # 评分表单
-                                    st.markdown("---")
-                                    st.markdown("**📝 评分与反馈**")
-                                    
-                                    with st.form(key=f"teacher_midterm_grade_form_{submission_id}_{student_username}_{sub_idx}"):
-                                        current_score = score if score is not None else 0
-                                        new_score = st.slider("评分", 0, 100, current_score, 
-                                                            key=f"teacher_midterm_score_{submission_id}_{student_username}_{sub_idx}")
-                                        new_feedback = st.text_area("教师反馈", teacher_feedback if teacher_feedback else "", 
-                                                                  placeholder="请输入对学生的反馈意见...", 
-                                                                  key=f"teacher_midterm_feedback_{submission_id}_{student_username}_{sub_idx}")
-                                        can_view = st.checkbox("允许学生查看分数", value=bool(allow_view_score), 
-                                                             key=f"teacher_midterm_view_{submission_id}_{student_username}_{sub_idx}")
-                                        new_status = st.selectbox("状态", 
-                                                                ["pending", "graded", "returned"], 
-                                                                index=["pending", "graded", "returned"].index(status) if status in ["pending", "graded", "returned"] else 0,
-                                                                key=f"teacher_midterm_status_{submission_id}_{student_username}_{sub_idx}")
-                                        
-                                        submitted = st.form_submit_button("💾 保存评分", use_container_width=True)
-                                        if submitted:
-                                            success, message = update_submission_score(submission_id, new_score, new_feedback, can_view, new_status)
-                                            if success:
-                                                st.success("✅ " + message)
-                                                st.rerun()
-                                            else:
-                                                st.error("❌ " + message)
-                    else:
-                        st.info("暂无学生提交的期中作业")
+                                    submitted = st.form_submit_button("💾 保存评分", use_container_width=True)
+                                    if submitted:
+                                        success, message = update_submission_score(submission_id, new_score, new_feedback, can_view, new_status)
+                                        if success:
+                                            st.success("✅ " + message)
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ " + message)
+                else:
+                    st.info("暂无学生提交的期中作业")
             
             with teacher_sub_tab3:
                 st.markdown("#### 🎓 期末作业管理")
@@ -3787,385 +4155,288 @@ else:
                             st.markdown('<div class="stats-card"><div>✅ 已批改</div><div class="stats-number">{}</div><div class="stats-label">完成评分</div></div>'.format(graded_submissions), unsafe_allow_html=True)
                         with col4:
                             st.markdown('<div class="stats-card"><div>🎯 平均分</div><div class="stats-number">{}</div><div class="stats-label">班级平均</div></div>'.format(int(average_score)), unsafe_allow_html=True)
+                    
+                    # 显示期末提交列表
+                    for sub_idx, sub in enumerate(final_submissions):
+                        try:
+                            submission_id = sub[0]
+                            student_username = sub[1]
+                            experiment_number = sub[2]
+                            submission_content = sub[4] if len(sub) > 4 else ""
+                            submission_time = sub[5] if len(sub) > 5 else ""
+                            status = sub[6] if len(sub) > 6 else "pending"
+                            teacher_feedback = sub[7] if len(sub) > 7 else None
+                            score = sub[8] if len(sub) > 8 else None
+                            resubmission_count = sub[9] if len(sub) > 9 else 0
+                            allow_view_score = sub[10] if len(sub) > 10 else False
+                            assignment_title = sub[11] if len(sub) > 11 else "期末作业"
+                            assignment_type = sub[12] if len(sub) > 12 else "final"
+                        except IndexError as e:
+                            st.error(f"数据格式错误: {e}")
+                            continue
                         
-                        # 学生筛选
-                        st.markdown("### 🔍 学生筛选")
-                        all_students = get_all_students()
-                        all_students.insert(0, "全部学生")
-                        selected_student = st.selectbox(
-                            "选择学生",
-                            options=all_students,
-                            key="teacher_final_filter_student"
-                        )
+                        status_info = {
+                            'pending': ('⏳ 待评审', 'status-pending'),
+                            'graded': ('✅ 已评分', 'status-graded'),
+                            'returned': ('🔙 需修改', 'status-returned')
+                        }.get(status, ('⚪ 未知', ''))
                         
-                        # 筛选提交
-                        filtered_submissions = final_submissions
-                        
-                        if selected_student != "全部学生":
-                            filtered_submissions = [s for s in filtered_submissions if s[1] == selected_student]
-                        
-                        # 显示期末提交列表
-                        for sub_idx, sub in enumerate(filtered_submissions):
-                            try:
-                                submission_id = sub[0]
-                                student_username = sub[1]
-                                experiment_number = sub[2]
-                                submission_content = sub[4] if len(sub) > 4 else ""
-                                submission_time = sub[5] if len(sub) > 5 else ""
-                                status = sub[6] if len(sub) > 6 else "pending"
-                                teacher_feedback = sub[7] if len(sub) > 7 else None
-                                score = sub[8] if len(sub) > 8 else None
-                                resubmission_count = sub[9] if len(sub) > 9 else 0
-                                allow_view_score = sub[10] if len(sub) > 10 else False
-                                assignment_title = sub[11] if len(sub) > 11 else "期末作业"
-                                assignment_type = sub[12] if len(sub) > 12 else "final"
-                            except IndexError as e:
-                                st.error(f"数据格式错误: {e}")
-                                continue
+                        with st.expander(f"{student_username} - {assignment_title} - {status_info[0]} - {submission_time}", expanded=False):
+                            col1, col2 = st.columns([3, 1])
                             
-                            status_info = {
-                                'pending': ('⏳ 待评审', 'status-pending'),
-                                'graded': ('✅ 已评分', 'status-graded'),
-                                'returned': ('🔙 需修改', 'status-returned')
-                            }.get(status, ('⚪ 未知', ''))
+                            with col1:
+                                st.markdown("**👤 学生:**")
+                                st.info(f"**{student_username}**")
+                                
+                                st.markdown("**📝 提交内容:**")
+                                st.text_area("内容", submission_content, height=150, 
+                                           key=f"teacher_final_content_{submission_id}_{student_username}_{sub_idx}", 
+                                           disabled=True)
+                                
+                                # 显示提交的文件
+                                if "提交文件:" in submission_content:
+                                    file_section = submission_content.split("提交文件:")[-1].strip()
+                                    if file_section:
+                                        st.markdown("**📦 提交的项目文件:**")
+                                        files = []
+                                        for filename in file_section.split(','):
+                                            if filename.strip():
+                                                files.append(filename.strip())
+                                                st.markdown(f"- {filename}")
+                                        
+                                        # 提供单次提交下载
+                                        if files:
+                                            assignment_id = get_assignment_id_by_type_and_number('final', 1)
+                                            if assignment_id:
+                                                # 下载完整提交
+                                                zip_path = download_student_files(student_username, assignment_id)
+                                                if zip_path and os.path.exists(zip_path):
+                                                    with open(zip_path, "rb") as f:
+                                                        zip_data = f.read()
+                                                        st.download_button(
+                                                            label="📦 下载本次提交完整文件",
+                                                            data=zip_data,
+                                                            file_name=f"{student_username}_期末作业_提交.zip",
+                                                            mime="application/zip",
+                                                            use_container_width=True,
+                                                            key=f"teacher_final_download_full_{submission_id}_{student_username}_{sub_idx}"
+                                                        )
+                                                
+                                                # 文件预览
+                                                st.markdown("**🔍 文件预览:**")
+                                                assignment_dir = os.path.join(UPLOAD_DIR, student_username, str(assignment_id))
+                                                if os.path.exists(assignment_dir):
+                                                    for file_idx, filename in enumerate(files):
+                                                        file_path = os.path.join(assignment_dir, filename)
+                                                        if os.path.exists(file_path):
+                                                            file_preview_col1, file_preview_col2 = st.columns([3, 1])
+                                                            with file_preview_col1:
+                                                                with st.expander(f"📄 {filename}", expanded=False):
+                                                                    preview_result, preview_type = preview_file(file_path)
+                                                                    if preview_result:
+                                                                        if preview_type == "image":
+                                                                            st.image(preview_result, caption=filename)
+                                                                        elif preview_type == "text":
+                                                                            st.code(preview_result, language='text')
+                                                                        else:
+                                                                            st.info(preview_result)
+                                                            with file_preview_col2:
+                                                                with open(file_path, "rb") as f:
+                                                                    file_data = f.read()
+                                                                    st.download_button(
+                                                                        label="📥 单独下载",
+                                                                        data=file_data,
+                                                                        file_name=filename,
+                                                                        mime="application/octet-stream",
+                                                                        key=f"teacher_final_single_file_{submission_id}_{student_username}_{file_idx}"
+                                                                    )
+                                
+                                # 显示现有评分和反馈
+                                if status == 'graded' and score is not None:
+                                    st.markdown(f"""
+                                    <div style='background: #10b981; color: white; padding: 15px; border-radius: 10px; 
+                                                font-weight: bold; text-align: center; margin: 10px 0; font-size: 1.2rem;'>
+                                        🎯 当前得分: {score}/100
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    if teacher_feedback:
+                                        st.markdown("**💬 当前反馈:**")
+                                        st.info(teacher_feedback)
                             
-                            with st.expander(f"{student_username} - {assignment_title} - {status_info[0]} - {submission_time}", expanded=False):
-                                col1, col2 = st.columns([3, 1])
+                            with col2:
+                                st.markdown(f"**📊 状态:**")
+                                st.markdown(f"<span class='{status_info[1]} status-badge'>{status_info[0]}</span>", unsafe_allow_html=True)
+                                st.markdown(f"**🕒 提交时间:** {submission_time}")
+                                st.markdown(f"**🔄 提交次数:** {resubmission_count}")
                                 
-                                with col1:
-                                    st.markdown("**👤 学生:**")
-                                    st.info(f"**{student_username}**")
-                                    
-                                    st.markdown("**📝 提交内容:**")
-                                    st.text_area("内容", submission_content, height=150, 
-                                               key=f"teacher_final_content_{submission_id}_{student_username}_{sub_idx}", 
-                                               disabled=True)
-                                    
-                                    # 显示提交的文件
-                                    if "提交文件:" in submission_content:
-                                        file_section = submission_content.split("提交文件:")[-1].strip()
-                                        if file_section:
-                                            st.markdown("**📦 提交的项目文件:**")
-                                            files = []
-                                            for filename in file_section.split(','):
-                                                if filename.strip():
-                                                    files.append(filename.strip())
-                                                    st.markdown(f"- {filename}")
-                                            
-                                            # 提供单次提交下载
-                                            if files:
-                                                assignment_id = get_assignment_id_by_type_and_number('final', 1)
-                                                if assignment_id:
-                                                    # 下载完整提交
-                                                    zip_path = download_student_files(student_username, assignment_id)
-                                                    if zip_path and os.path.exists(zip_path):
-                                                        with open(zip_path, "rb") as f:
-                                                            zip_data = f.read()
-                                                            st.download_button(
-                                                                label="📦 下载本次提交完整文件",
-                                                                data=zip_data,
-                                                                file_name=f"{student_username}_期末作业_提交.zip",
-                                                                mime="application/zip",
-                                                                use_container_width=True,
-                                                                key=f"teacher_final_download_full_{submission_id}_{student_username}_{sub_idx}"
-                                                            )
-                                                    
-                                                    # 文件预览
-                                                    st.markdown("**🔍 文件预览:**")
-                                                    assignment_dir = os.path.join(UPLOAD_DIR, student_username, str(assignment_id))
-                                                    if os.path.exists(assignment_dir):
-                                                        for file_idx, filename in enumerate(files):
-                                                            file_path = os.path.join(assignment_dir, filename)
-                                                            if os.path.exists(file_path):
-                                                                file_preview_col1, file_preview_col2 = st.columns([3, 1])
-                                                                with file_preview_col1:
-                                                                    with st.expander(f"📄 {filename}", expanded=False):
-                                                                        preview_result, preview_type = preview_file(file_path)
-                                                                        if preview_result:
-                                                                            if preview_type == "image":
-                                                                                st.image(preview_result, caption=filename)
-                                                                            elif preview_type == "text":
-                                                                                st.code(preview_result, language='text')
-                                                                            else:
-                                                                                st.info(preview_result)
-                                                                with file_preview_col2:
-                                                                    with open(file_path, "rb") as f:
-                                                                        file_data = f.read()
-                                                                        st.download_button(
-                                                                            label="📥 单独下载",
-                                                                            data=file_data,
-                                                                            file_name=filename,
-                                                                            mime="application/octet-stream",
-                                                                            key=f"teacher_final_single_file_{submission_id}_{student_username}_{file_idx}"
-                                                                        )
-                                    
-                                    # 显示现有评分和反馈
-                                    if status == 'graded' and score is not None:
-                                        st.markdown(f"""
-                                        <div style='background: #10b981; color: white; padding: 15px; border-radius: 10px; 
-                                                    font-weight: bold; text-align: center; margin: 10px 0; font-size: 1.2rem;'>
-                                            🎯 当前得分: {score}/100
-                                        </div>
-                                        """, unsafe_allow_html=True)
-                                        
-                                        if teacher_feedback:
-                                            st.markdown("**💬 当前反馈:**")
-                                            st.info(teacher_feedback)
+                                # 评分表单
+                                st.markdown("---")
+                                st.markdown("**📝 评分与反馈**")
                                 
-                                with col2:
-                                    st.markdown(f"**📊 状态:**")
-                                    st.markdown(f"<span class='{status_info[1]} status-badge'>{status_info[0]}</span>", unsafe_allow_html=True)
-                                    st.markdown(f"**🕒 提交时间:** {submission_time}")
-                                    st.markdown(f"**🔄 提交次数:** {resubmission_count}")
+                                with st.form(key=f"teacher_final_grade_form_{submission_id}_{student_username}_{sub_idx}"):
+                                    current_score = score if score is not None else 0
+                                    new_score = st.slider("评分", 0, 100, current_score, 
+                                                        key=f"teacher_final_score_{submission_id}_{student_username}_{sub_idx}")
+                                    new_feedback = st.text_area("教师反馈", teacher_feedback if teacher_feedback else "", 
+                                                              placeholder="请输入对学生的反馈意见...", 
+                                                              key=f"teacher_final_feedback_{submission_id}_{student_username}_{sub_idx}")
+                                    can_view = st.checkbox("允许学生查看分数", value=bool(allow_view_score), 
+                                                         key=f"teacher_final_view_{submission_id}_{student_username}_{sub_idx}")
+                                    new_status = st.selectbox("状态", 
+                                                            ["pending", "graded", "returned"], 
+                                                            index=["pending", "graded", "returned"].index(status) if status in ["pending", "graded", "returned"] else 0,
+                                                            key=f"teacher_final_status_{submission_id}_{student_username}_{sub_idx}")
                                     
-                                    # 评分表单
-                                    st.markdown("---")
-                                    st.markdown("**📝 评分与反馈**")
-                                    
-                                    with st.form(key=f"teacher_final_grade_form_{submission_id}_{student_username}_{sub_idx}"):
-                                        current_score = score if score is not None else 0
-                                        new_score = st.slider("评分", 0, 100, current_score, 
-                                                            key=f"teacher_final_score_{submission_id}_{student_username}_{sub_idx}")
-                                        new_feedback = st.text_area("教师反馈", teacher_feedback if teacher_feedback else "", 
-                                                                  placeholder="请输入对学生的反馈意见...", 
-                                                                  key=f"teacher_final_feedback_{submission_id}_{student_username}_{sub_idx}")
-                                        can_view = st.checkbox("允许学生查看分数", value=bool(allow_view_score), 
-                                                             key=f"teacher_final_view_{submission_id}_{student_username}_{sub_idx}")
-                                        new_status = st.selectbox("状态", 
-                                                                ["pending", "graded", "returned"], 
-                                                                index=["pending", "graded", "returned"].index(status) if status in ["pending", "graded", "returned"] else 0,
-                                                                key=f"teacher_final_status_{submission_id}_{student_username}_{sub_idx}")
-                                        
-                                        submitted = st.form_submit_button("💾 保存评分", use_container_width=True)
-                                        if submitted:
-                                            success, message = update_submission_score(submission_id, new_score, new_feedback, can_view, new_status)
-                                            if success:
-                                                st.success("✅ " + message)
-                                                st.rerun()
-                                            else:
-                                                st.error("❌ " + message)
+                                    submitted = st.form_submit_button("💾 保存评分", use_container_width=True)
+                                    if submitted:
+                                        success, message = update_submission_score(submission_id, new_score, new_feedback, can_view, new_status)
+                                        if success:
+                                            st.success("✅ " + message)
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ " + message)
+
                 else:
                     st.info("暂无期末作业信息")
             
             with teacher_sub_tab4:
-                st.markdown("#### 📈 成绩管理与导出")
+                st.markdown("### 📊 成绩导出中心")
                 
-                # 成绩概览
-                st.markdown("### 📊 成绩概览")
+                # 获取所有学生列表
+                students = get_all_students()
                 
-                # 获取所有学生
-                all_students = get_all_students()
-                
-                # 学生筛选
-                col1, col2 = st.columns([3, 1])
-                with col1:
+                if students:
+                    # 学生筛选
+                    st.markdown("#### 🔍 学生筛选")
                     selected_student = st.selectbox(
-                        "选择学生",
-                        options=["全部学生"] + all_students,
-                        key="grade_export_filter_student"
+                        "选择学生（可选，不选则导出所有学生）",
+                        options=["全部学生"] + students,
+                        index=0,
+                        key="export_student_select"
                     )
-                
-                with col2:
-                    selected_assignment_type = st.selectbox(
-                        "选择作业类型",
-                        options=["全部类型", "experiment", "midterm", "final"],
-                        key="grade_export_filter_type"
-                    )
-                
-                # 获取成绩数据
-                student_filter = None if selected_student == "全部学生" else selected_student
-                type_filter = None if selected_assignment_type == "全部类型" else selected_assignment_type
-                
-                # 获取成绩数据
-                grades_df = get_student_grades(student_filter, type_filter)
-                
-                if not grades_df.empty:
-                    # 显示数据概览
-                    st.markdown(f"**找到 {len(grades_df)} 条成绩记录**")
                     
-                    # 显示数据表格
-                    st.dataframe(grades_df, use_container_width=True)
+                    student_filter = None if selected_student == "全部学生" else selected_student
                     
-                    # 成绩统计
-                    st.markdown("### 📈 成绩统计")
+                    # 显示导出选项
+                    st.markdown("#### 📈 导出选项")
                     
-                    # 按作业类型分组统计
-                    if 'assignment_type' in grades_df.columns:
-                        stats_cols = st.columns(3)
-                        
-                        for idx, (assign_type, group) in enumerate(grades_df.groupby('assignment_type')):
-                            with stats_cols[idx % 3]:
-                                avg_score = group['score'].mean()
-                                max_score = group['score'].max()
-                                min_score = group['score'].min()
-                                count = len(group)
-                                
-                                assign_name = {
-                                    'experiment': '实验作业',
-                                    'midterm': '期中作业',
-                                    'final': '期末作业'
-                                }.get(assign_type, assign_type)
-                                
-                                st.markdown(f"""
-                                <div class='stats-card'>
-                                    <div>{assign_name}</div>
-                                    <div class='stats-number'>{avg_score:.1f}</div>
-                                    <div class='stats-label'>平均分 (共{count}份)</div>
-                                    <div style='font-size: 0.8rem; color: #666; margin-top: 10px;'>
-                                        最高: {max_score} | 最低: {min_score}
-                                    </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                    
-                    # 导出功能
-                    st.markdown("### 📤 成绩导出")
-                    
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
-                        if st.button("📥 导出实验成绩", use_container_width=True, key="export_experiment"):
-                            with st.spinner("正在生成Excel文件..."):
-                                excel_path, error = export_grades_to_excel(student_filter, 'experiment')
-                                if excel_path and os.path.exists(excel_path):
-                                    with open(excel_path, "rb") as f:
-                                        excel_data = f.read()
-                                        st.download_button(
-                                            label="✅ 下载实验成绩",
-                                            data=excel_data,
-                                            file_name=f"实验成绩_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            use_container_width=True
-                                        )
-                                    # 清理临时文件
-                                    try:
-                                        if os.path.exists(excel_path):
-                                            os.remove(excel_path)
-                                    except:
-                                        pass
-                                elif error:
-                                    st.error(error)
+                        if st.button("📋 实验成绩导出", use_container_width=True, type="primary"):
+                            with st.spinner("正在生成实验成绩Excel文件..."):
+                                excel_data, error = export_experiment_scores_to_excel(student_filter)
+                                if excel_data:
+                                    filename = f"实验成绩_{selected_student}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                    st.download_button(
+                                        label="📥 下载实验成绩Excel",
+                                        data=excel_data,
+                                        file_name=filename,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="download_experiment_scores"
+                                    )
+                                    st.success("✅ 实验成绩Excel文件已生成！")
+                                else:
+                                    st.error(f"❌ {error}")
                     
                     with col2:
-                        if st.button("📥 导出期中成绩", use_container_width=True, key="export_midterm"):
-                            with st.spinner("正在生成Excel文件..."):
-                                excel_path, error = export_grades_to_excel(student_filter, 'midterm')
-                                if excel_path and os.path.exists(excel_path):
-                                    with open(excel_path, "rb") as f:
-                                        excel_data = f.read()
-                                        st.download_button(
-                                            label="✅ 下载期中成绩",
-                                            data=excel_data,
-                                            file_name=f"期中成绩_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            use_container_width=True
-                                        )
-                                    # 清理临时文件
-                                    try:
-                                        if os.path.exists(excel_path):
-                                            os.remove(excel_path)
-                                    except:
-                                        pass
-                                elif error:
-                                    st.error(error)
+                        if st.button("📊 期中成绩导出", use_container_width=True, type="primary"):
+                            with st.spinner("正在生成期中成绩Excel文件..."):
+                                excel_data, error = export_midterm_scores_to_excel(student_filter)
+                                if excel_data:
+                                    filename = f"期中成绩_{selected_student}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                    st.download_button(
+                                        label="📥 下载期中成绩Excel",
+                                        data=excel_data,
+                                        file_name=filename,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="download_midterm_scores"
+                                    )
+                                    st.success("✅ 期中成绩Excel文件已生成！")
+                                else:
+                                    st.error(f"❌ {error}")
                     
                     with col3:
-                        if st.button("📥 导出期末成绩", use_container_width=True, key="export_final"):
-                            with st.spinner("正在生成Excel文件..."):
-                                excel_path, error = export_grades_to_excel(student_filter, 'final')
-                                if excel_path and os.path.exists(excel_path):
-                                    with open(excel_path, "rb") as f:
-                                        excel_data = f.read()
-                                        st.download_button(
-                                            label="✅ 下载期末成绩",
-                                            data=excel_data,
-                                            file_name=f"期末成绩_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            use_container_width=True
-                                        )
-                                    # 清理临时文件
-                                    try:
-                                        if os.path.exists(excel_path):
-                                            os.remove(excel_path)
-                                    except:
-                                        pass
-                                elif error:
-                                    st.error(error)
-                    
-                    # 导出所有成绩
-                    st.markdown("---")
-                    if st.button("📦 导出所有成绩（完整报告）", use_container_width=True, type="primary", key="export_all"):
-                        with st.spinner("正在生成完整成绩报告..."):
-                            excel_path, error = export_grades_to_excel(student_filter, None)
-                            if excel_path and os.path.exists(excel_path):
-                                with open(excel_path, "rb") as f:
-                                    excel_data = f.read()
+                        if st.button("🎓 期末成绩导出", use_container_width=True, type="primary"):
+                            with st.spinner("正在生成期末成绩Excel文件..."):
+                                excel_data, error = export_final_scores_to_excel(student_filter)
+                                if excel_data:
+                                    filename = f"期末成绩_{selected_student}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                                     st.download_button(
-                                        label="✅ 下载完整成绩报告",
+                                        label="📥 下载期末成绩Excel",
                                         data=excel_data,
-                                        file_name=f"成绩报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                        file_name=filename,
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        use_container_width=True
+                                        key="download_final_scores"
                                     )
-                                # 清理临时文件
-                                try:
-                                    if os.path.exists(excel_path):
-                                        os.remove(excel_path)
-                                except:
-                                    pass
-                            elif error:
-                                st.error(error)
+                                    st.success("✅ 期末成绩Excel文件已生成！")
+                                else:
+                                    st.error(f"❌ {error}")
                     
-                    # 成绩分析图表
-                    if len(grades_df) > 0:
-                        st.markdown("### 📊 成绩分布分析")
+
+                    
+                    # 显示当前筛选的学生信息
+                    if student_filter:
+                        st.info(f"当前筛选学生: **{student_filter}**")
                         
-                        # 按作业类型分组显示图表
-                        assignment_types = grades_df['assignment_type'].unique()
+                        # 显示该学生的成绩概览
+                        st.markdown("#### 📊 学生成绩概览")
                         
-                        for assign_type in assignment_types:
-                            assign_name = {
-                                'experiment': '实验作业',
-                                'midterm': '期中作业',
-                                'final': '期末作业'
-                            }.get(assign_type, assign_type)
+                        # 获取学生各项成绩
+                        submissions = get_student_submissions(student_filter)
+                        
+                        if submissions:
+                            # 分类统计
+                            experiment_scores = [s[8] for s in submissions if s[-1] == 'experiment' and s[8] is not None]
+                            midterm_scores = [s[8] for s in submissions if s[-1] == 'midterm' and s[8] is not None]
+                            final_scores = [s[8] for s in submissions if s[-1] == 'final' and s[8] is not None]
                             
-                            type_df = grades_df[grades_df['assignment_type'] == assign_type]
+                            col1, col2, col3, col4 = st.columns(4)
                             
-                            if assign_type == 'experiment':
-                                # 实验成绩按实验编号分组
-                                st.markdown(f"#### {assign_name}成绩分布")
-                                
-                                # 创建分组柱状图
-                                fig, ax = plt.subplots(figsize=(8, 5))
-                                
-                                # 按学生和实验编号分组
-                                pivot_df = type_df.pivot_table(
-                                    index='student_username',
-                                    columns='experiment_number',
-                                    values='score',
-                                    aggfunc='mean'
-                                )
-                                
-                                # 绘制热力图
-                                import seaborn as sns
-                                plt.figure(figsize=(8, 5))
-                                sns.heatmap(pivot_df, annot=True, fmt=".1f", cmap="YlOrRd", 
-                                          cbar_kws={'label': '分数'}, linewidths=0.5)
-                                plt.title(f'{assign_name}成绩热力图')
-                                plt.xlabel('实验编号')
-                                plt.ylabel('学生')
-                                st.pyplot(plt)
-                            else:
-                                # 期中/期末成绩直方图
-                                st.markdown(f"#### {assign_name}成绩分布")
-                                
-                                fig, ax = plt.subplots(figsize=(8, 5))
-                                scores = type_df['score'].dropna()
-                                ax.hist(scores, bins=10, edgecolor='black', alpha=0.7, color='#dc2626')
-                                ax.set_xlabel('分数')
-                                ax.set_ylabel('人数')
-                                ax.set_title(f'{assign_name}成绩分布直方图')
-                                ax.grid(True, alpha=0.3)
-                                st.pyplot(fig)
+                            with col1:
+                                st.metric("实验提交次数", len([s for s in submissions if s[-1] == 'experiment']))
+                            with col2:
+                                if experiment_scores:
+                                    st.metric("实验平均分", f"{sum(experiment_scores)/len(experiment_scores):.1f}")
+                                else:
+                                    st.metric("实验平均分", "未评分")
+                            with col3:
+                                if midterm_scores:
+                                    st.metric("期中成绩", f"{midterm_scores[0]:.1f}")
+                                else:
+                                    st.metric("期中成绩", "未提交")
+                            with col4:
+                                if final_scores:
+                                    st.metric("期末成绩", f"{final_scores[0]:.1f}")
+                                else:
+                                    st.metric("期末成绩", "未提交")
+                        else:
+                            st.info("该学生暂无提交记录")
+                    else:
+                        st.info("当前导出所有学生成绩")
+                        
+                        # 显示总体统计
+                        st.markdown("#### 📈 总体统计")
+                        
+                        # 获取所有提交统计
+                        all_submissions = get_all_submissions()
+                        
+                        if all_submissions:
+                            total_students = len(set([s[1] for s in all_submissions]))
+                            total_submissions = len(all_submissions)
+                            graded_submissions = len([s for s in all_submissions if s[6] == 'graded'])
+                            graded_scores = [s[8] for s in all_submissions if s[6] == 'graded' and s[8] is not None]
+                            avg_score = sum(graded_scores)/len(graded_scores) if graded_scores else 0
+                            
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("总学生数", total_students)
+                            with col2:
+                                st.metric("总提交数", total_submissions)
+                            with col3:
+                                st.metric("已批改数", graded_submissions)
+                            with col4:
+                                st.metric("平均分", f"{avg_score:.1f}")
                 else:
-                    st.info("暂无成绩数据")
+                    st.info("暂无学生提交记录，无法导出成绩")

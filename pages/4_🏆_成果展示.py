@@ -388,25 +388,29 @@ def render_sidebar():
         # 快速导航
         st.markdown("### 🧭 快速导航")
         
-        if st.button("🏠 返回首页", width='stretch'):
+        if st.button("🏠 返回首页", width='content'):
             st.switch_page("main.py")
-        if st.button("🔬 图像处理实验室", width='stretch'):
+        if st.button("🔬 图像处理实验室", width='content'):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("🏫加入班级与在线签到", use_container_width=True):
+        if st.button("📝 智能与传统图片处理", use_container_width=True):
+            # 使用JavaScript在新标签页打开链接
+            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
+            st.components.v1.html(js, height=0)
+        if st.button("🏫 加入班级与在线签到", width='content'):
             st.switch_page("pages/分班和在线签到.py")
-        if st.button("📤 实验作业提交", width='stretch'):
+        if st.button("📤 实验作业提交", width='content'):
             st.switch_page("pages/实验作业提交.py")            
-        if st.button("📚 学习资源中心", width='stretch'):
+        if st.button("📚 学习资源中心", width='content'):
             st.switch_page("pages/2_📚_学习资源中心.py")
-        if st.button("📝 我的思政足迹", width='stretch'):
+        if st.button("📝 我的思政足迹", width='content'):
             st.switch_page("pages/3_📝_我的思政足迹.py")
-        if st.button("🏆 成果展示", width='stretch'):
+        if st.button("🏆 成果展示", width='content'):
             st.switch_page("pages/4_🏆_成果展示.py")
         
         # 用户提交记录查看
         if "logged_in" in st.session_state and st.session_state.logged_in:
             st.markdown("---")
-            if st.button("📋 我的提交记录", width='stretch'):
+            if st.button("📋 我的提交记录", width='content'):
                 st.session_state.show_my_projects = True
                 st.rerun()
         
@@ -414,7 +418,7 @@ def render_sidebar():
         if "logged_in" in st.session_state and st.session_state.logged_in:
             if verify_teacher_role(st.session_state.username):
                 st.markdown("---")
-                if st.button("🔧 进入教师后台", width='stretch', type="primary"):
+                if st.button("🔧 进入教师后台", width='content', type="primary"):
                     st.session_state.show_admin = True
                     st.rerun()
         
@@ -447,7 +451,7 @@ def render_sidebar():
         ]
         
         for topic in theory_topics:
-            if st.button(f"📖 {topic}", key=f"theory_{topic}", width='stretch'):
+            if st.button(f"📖 {topic}", key=f"theory_{topic}", width='content'):
                 st.info(f"开始学习：{topic}")
         
         st.markdown("---")
@@ -856,7 +860,8 @@ def render_my_projects():
                             data=zip_data,
                             file_name=f"{project['project_name']}_作品文件.zip",
                             mime="application/zip",
-                            key=f"download_{project['id']}"
+                            key=f"download_{project['id']}",
+                            width='content'
                         )
                         st.info("💡 您可以随时下载您提交的文件")
     else:
@@ -979,7 +984,8 @@ def render_admin_dashboard():
                                         data=zip_data,
                                         file_name=f"{project['project_name']}_作品文件.zip",
                                         mime="application/zip",
-                                        key=f"admin_download_{project['id']}"
+                                        key=f"admin_download_{project['id']}",
+                                        width='content'
                                     )
                     
                     with col2:
@@ -1006,12 +1012,12 @@ def render_admin_dashboard():
                             review_notes = st.text_area(f"审核意见（可选）", key=f"notes_{project['id']}")
                         
                         with col2:
-                            if st.button("✅ 通过审核", key=f"approve_{project['id']}"):
+                            if st.button("✅ 通过审核", key=f"approve_{project['id']}", width='content'):
                                 if update_project_status(project['id'], "已通过", review_notes):
                                     st.success("作品已通过审核！")
                                     st.rerun()
                             
-                            if st.button("❌ 拒绝作品", key=f"reject_{project['id']}"):
+                            if st.button("❌ 拒绝作品", key=f"reject_{project['id']}", width='content'):
                                 if update_project_status(project['id'], "已拒绝", review_notes):
                                     st.success("作品已拒绝！")
                                     st.rerun()
@@ -1046,7 +1052,8 @@ def render_admin_dashboard():
                     label="📥 导出反馈数据（CSV-GB18030编码）",
                     data=csv_bytes,
                     file_name=f"意见反馈_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    width='content'
                 )
             
             # 显示反馈统计
@@ -1181,7 +1188,7 @@ def render_main_content():
     # 页面标题
     st.markdown("""
     <div class='modern-header'>
-        <h1 >🏆 思政成果展示</h1>
+        <h1 class='main-title'>🏆 思政成果展示</h1>
         <p style='font-size: 1.2rem; color: rgba(255,255,255,0.9);'>技术赋能 · 思想引领 · 创新驱动 · 服务国家</p>
     </div>
     """, unsafe_allow_html=True)
@@ -1365,7 +1372,7 @@ def render_main_content():
                 help="支持多种格式文件，建议单个文件不超过20MB"
             )
             
-            submitted = st.form_submit_button("🚀 提交作品", type="primary")
+            submitted = st.form_submit_button("🚀 提交作品", type="primary", width='content')
             
             if submitted:
                 if project_name and author_name and project_desc:
@@ -1418,7 +1425,7 @@ def render_main_content():
         
         col1, col2 = st.columns([3, 1])
         with col1:
-            if st.button("📤 提交反馈", type="primary"):
+            if st.button("📤 提交反馈", type="primary", width='content'):
                 if feedback_content.strip():
                     if save_feedback_to_db(feedback_content):
                         st.success("✅ 感谢您的反馈！我们会认真参考~")
@@ -1428,7 +1435,7 @@ def render_main_content():
                 else:
                     st.warning("⚠️ 请输入反馈内容后再提交哦~")
         with col2:
-            if st.button("🔄 清空内容"):
+            if st.button("🔄 清空内容", width='content'):
                 st.rerun()
 
 def main():

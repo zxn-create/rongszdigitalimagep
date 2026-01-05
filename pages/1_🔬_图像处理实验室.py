@@ -18,7 +18,8 @@ from scipy.signal import convolve2d
 import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
-
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']  # 设置中文字体
+plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
 st.set_page_config(
     page_title="图像处理实验室 - 融思政平台",
     page_icon="🔬",
@@ -652,6 +653,47 @@ section[data-testid="stSidebar"] {
         opacity: 0;
     }
 }
+
+/* 直方图样式 */
+.histogram-container {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    border: 2px solid #e5e7eb;
+}
+
+.histogram-title {
+    text-align: center;
+    margin-bottom: 15px;
+    color: #dc2626;
+    font-weight: bold;
+    font-size: 1.2rem;
+}
+
+.histogram-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 30px;
+}
+
+.histogram-box {
+    text-align: center;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    border: 2px solid #e9ecef;
+}
+
+.histogram-box h5 {
+    margin-bottom: 15px;
+    color: #333;
+    font-weight: 600;
+    border-bottom: 2px solid #dc2626;
+    padding-bottom: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -792,7 +834,6 @@ def submit_experiment(student_username, experiment_number, experiment_title, sub
         return True, "实验提交成功！", submission_id
     except Exception as e:
         return False, f"提交失败：{str(e)}", None
-
 
 
 
@@ -2259,6 +2300,7 @@ def colorize_old_photo(image, color_intensity=1.0, ai_assist=True):
     final_enhanced = cv2.GaussianBlur(final_enhanced, (3, 3), 0.5)
     
     return final_enhanced
+
 def apply_deep_learning_colorization(image):
     """
     深度学习风格的上色（简化版）
@@ -2484,6 +2526,175 @@ def provide_download_button(image_rgb, filename, button_text, unique_key_suffix=
         
     except Exception as e:
         st.error(f"下载功能出错: {str(e)}")
+
+def create_color_histogram(image_rgb, title="颜色直方图"):
+    """
+    创建RGB颜色直方图并返回Matplotlib图形
+    
+    Args:
+        image_rgb: RGB格式的图像数组（或灰度图）
+        title: 直方图标题
+    
+    Returns:
+        fig: Matplotlib图形对象
+    """
+    # 检查图像维度
+    if len(image_rgb.shape) == 2:
+        # 灰度图像
+        gray_channel = image_rgb
+        
+        # 创建图形
+        fig, ax = plt.subplots(figsize=(10, 4))
+        
+        # 计算直方图
+        hist_gray = cv2.calcHist([gray_channel], [0], None, [256], [0, 256])
+        
+        # 归一化以便比较
+        hist_gray = cv2.normalize(hist_gray, hist_gray, 0, 1, cv2.NORM_MINMAX)
+        
+        # 绘制直方图（灰色）
+        ax.plot(hist_gray, color='gray', label='Gray', alpha=0.7, linewidth=2)
+        
+        # 设置图形属性
+        ax.set_title(title, fontsize=14, fontweight='bold', color='#333')
+        ax.set_xlabel('像素强度', fontsize=12)
+        ax.set_ylabel('归一化频率', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        
+    elif len(image_rgb.shape) == 3:
+        # 彩色图像
+        # 分离RGB通道
+        r_channel = image_rgb[:,:,0]
+        g_channel = image_rgb[:,:,1]
+        b_channel = image_rgb[:,:,2]
+        
+        # 创建图形
+        fig, ax = plt.subplots(figsize=(10, 4))
+        
+        # 计算直方图
+        hist_r = cv2.calcHist([r_channel], [0], None, [256], [0, 256])
+        hist_g = cv2.calcHist([g_channel], [0], None, [256], [0, 256])
+        hist_b = cv2.calcHist([b_channel], [0], None, [256], [0, 256])
+        
+        # 归一化以便比较
+        hist_r = cv2.normalize(hist_r, hist_r, 0, 1, cv2.NORM_MINMAX)
+        hist_g = cv2.normalize(hist_g, hist_g, 0, 1, cv2.NORM_MINMAX)
+        hist_b = cv2.normalize(hist_b, hist_b, 0, 1, cv2.NORM_MINMAX)
+        
+        # 绘制直方图
+        ax.plot(hist_r, color='red', label='Red', alpha=0.7, linewidth=2)
+        ax.plot(hist_g, color='green', label='Green', alpha=0.7, linewidth=2)
+        ax.plot(hist_b, color='blue', label='Blue', alpha=0.7, linewidth=2)
+        
+        # 设置图形属性
+        ax.set_title(title, fontsize=14, fontweight='bold', color='#333')
+        ax.set_xlabel('像素强度', fontsize=12)
+        ax.set_ylabel('归一化频率', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+    
+    else:
+        # 未知格式
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.text(0.5, 0.5, '无法生成直方图\n图像格式不支持', 
+                horizontalalignment='center', verticalalignment='center',
+                transform=ax.transAxes, fontsize=12, color='red')
+        ax.set_title(title, fontsize=14, fontweight='bold', color='#333')
+    
+    # 设置背景色
+    fig.patch.set_facecolor('#f8f9fa')
+    if 'ax' in locals():
+        ax.set_facecolor('#ffffff')
+    
+    return fig
+
+def display_comparison_with_histograms(original_rgb, processed_rgb, original_title="原始图像", processed_title="处理结果"):
+    """
+    显示图像对比和直方图对比
+    
+    Args:
+        original_rgb: 原始RGB图像（或灰度图）
+        processed_rgb: 处理后的RGB图像（或灰度图）
+        original_title: 原始图像标题
+        processed_title: 处理后图像标题
+    """
+    # 创建两列布局
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # 原始图像
+        st.markdown(f'<h4 style="text-align: center;">{original_title}</h4>', unsafe_allow_html=True)
+        
+        # 检查图像维度并正确显示
+        if len(original_rgb.shape) == 2:
+            # 灰度图像
+            st.image(original_rgb, use_container_width=True, clamp=True)
+        else:
+            # 彩色图像
+            st.image(original_rgb, use_container_width=True)
+        
+        # 原始图像直方图
+        with st.expander("📊 原始图像颜色直方图", expanded=True):
+            fig_orig = create_color_histogram(original_rgb, "原始图像颜色分布")
+            st.pyplot(fig_orig)
+    
+    with col2:
+        # 处理后的图像
+        st.markdown(f'<h4 style="text-align: center;">{processed_title}</h4>', unsafe_allow_html=True)
+        
+        # 检查图像维度并正确显示
+        if len(processed_rgb.shape) == 2:
+            # 灰度图像
+            st.image(processed_rgb, use_container_width=True, clamp=True)
+        else:
+            # 彩色图像
+            st.image(processed_rgb, use_container_width=True)
+        
+        # 处理后图像直方图
+        with st.expander("📊 处理后图像颜色直方图", expanded=True):
+            fig_proc = create_color_histogram(processed_rgb, "处理后图像颜色分布")
+            st.pyplot(fig_proc)
+    
+    # 分割线
+    st.markdown("---")
+
+def display_comparison_with_histograms(original_rgb, processed_rgb, original_title="原始图像", processed_title="处理结果"):
+    """
+    显示图像对比和直方图对比
+    
+    Args:
+        original_rgb: 原始RGB图像
+        processed_rgb: 处理后的RGB图像
+        original_title: 原始图像标题
+        processed_title: 处理后图像标题
+    """
+    # 创建两列布局
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # 原始图像
+        st.markdown(f'<h4 style="text-align: center;">{original_title}</h4>', unsafe_allow_html=True)
+        st.image(original_rgb, use_container_width=True)
+        
+        # 原始图像直方图
+        with st.expander("📊 原始图像颜色直方图", expanded=True):
+            fig_orig = create_color_histogram(original_rgb, "原始图像颜色分布")
+            st.pyplot(fig_orig)
+    
+    with col2:
+        # 处理后的图像
+        st.markdown(f'<h4 style="text-align: center;">{processed_title}</h4>', unsafe_allow_html=True)
+        st.image(processed_rgb, use_container_width=True)
+        
+        # 处理后图像直方图
+        with st.expander("📊 处理后图像颜色直方图", expanded=True):
+            fig_proc = create_color_histogram(processed_rgb, "处理后图像颜色分布")
+            st.pyplot(fig_proc)
+    
+    # 分割线
+    st.markdown("---")
+
 # ======================= 侧边栏渲染 =======================
 def render_sidebar():
     with st.sidebar:
@@ -2501,11 +2712,13 @@ def render_sidebar():
         
         # 修复导航按钮
         if st.button("🏠 返回首页", use_container_width=True):
-            st.switch_page("main.py")        
+            st.switch_page("main.py")
         if st.button("🔬 图像处理实验室", use_container_width=True):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("🏫加入班级与在线签到", use_container_width=True):
-            st.switch_page("pages/分班和在线签到.py")
+        if st.button("📝 智能与传统图片处理", use_container_width=True):
+            # 使用JavaScript在新标签页打开链接
+            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
+            st.components.v1.html(js, height=0)
         if st.button("📤 实验作业提交", use_container_width=True):
             st.switch_page("pages/实验作业提交.py")
         if st.button("📚 学习资源中心", use_container_width=True):
@@ -2731,6 +2944,14 @@ with tabs[0]:
                 st.image(result_rgb, caption=f"{enhancement_method}结果", use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
+                # 显示对比和直方图
+                display_comparison_with_histograms(
+                    image_rgb, 
+                    result_rgb, 
+                    original_title="原始图像", 
+                    processed_title=f"{enhancement_method}结果"
+                )
+                
                 # 下载时使用RGB版本
                 provide_download_button(
                     result_rgb, 
@@ -2789,6 +3010,16 @@ with tabs[1]:
             
             if canny_result_rgb is not None:
                 st.image(canny_result_rgb, use_container_width=True)
+                
+                # 显示对比和直方图
+                st.markdown("### 对比分析")
+                display_comparison_with_histograms(
+                    image_rgb, 
+                    canny_result_rgb, 
+                    original_title="原始图像", 
+                    processed_title="Canny边缘检测结果"
+                )
+                
                 provide_download_button(
                     canny_result_rgb, 
                     "edges_canny.jpg", 
@@ -2807,6 +3038,16 @@ with tabs[1]:
             
             if sobel_result_rgb is not None:
                 st.image(sobel_result_rgb, use_container_width=True)
+                
+                # 显示对比和直方图
+                st.markdown("### 对比分析")
+                display_comparison_with_histograms(
+                    image_rgb, 
+                    sobel_result_rgb, 
+                    original_title="原始图像", 
+                    processed_title="Sobel边缘检测结果"
+                )
+                
                 provide_download_button(
                     sobel_result_rgb, 
                     "edges_sobel.jpg", 
@@ -2851,6 +3092,16 @@ with tabs[1]:
             
             if laplacian_result_rgb is not None:
                 st.image(laplacian_result_rgb, caption=f"Laplacian ksize={laplacian_ksize}", use_container_width=True)
+                
+                # 显示对比和直方图
+                st.markdown("### 对比分析")
+                display_comparison_with_histograms(
+                    image_rgb, 
+                    laplacian_result_rgb, 
+                    original_title="原始图像", 
+                    processed_title="Laplacian边缘检测结果"
+                )
+                
                 provide_download_button(
                     laplacian_result_rgb, 
                     "edges_laplacian.jpg", 
@@ -3039,6 +3290,15 @@ with tabs[2]:
                     [{matrix[1,0]:.6f}, {matrix[1,1]:.6f}, {matrix[1,2]:.6f}]
                     [{matrix[2,0]:.6f}, {matrix[2,1]:.6f}, {matrix[2,2]:.6f}]
                     """)
+            
+            # 显示对比和直方图
+            st.markdown("### 🖼️ 变换效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                result_rgb, 
+                original_title="原始图像", 
+                processed_title=f"{transform_type}结果"
+            )
             
             provide_download_button(
                 result_rgb, 
@@ -3285,92 +3545,24 @@ with tabs[3]:
             if result_image.dtype != np.uint8:
                 result_image = result_image.astype(np.uint8)
             
-            # 创建对比展示
-            st.markdown("### 🖼️ 锐化效果对比")
+            # 显示对比和直方图
+            st.markdown(f"### 🖼️ {sharpen_method}效果对比")
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("#### 📷 原始图像")
-                if processing_mode == "灰度图像锐化":
-                    st.image(image_for_display, use_container_width=True, 
-                            caption=f"灰度图像 {image_for_display.shape[1]} × {image_for_display.shape[0]}",
-                            clamp=True)
-                else:
-                    st.image(image_for_display, use_container_width=True, 
-                            caption=f"彩色图像 {image_for_display.shape[1]} × {image_for_display.shape[0]}")
-            
-            with col2:
-                st.markdown(f"#### ✨ {sharpen_method}")
-                if processing_mode == "灰度图像锐化":
-                    st.image(result_image, use_container_width=True, 
-                            caption=f"锐化后灰度图 {result_image.shape[1]} × {result_image.shape[0]}",
-                            clamp=True)
-                else:
-                    st.image(result_image, use_container_width=True, 
-                            caption=f"锐化后彩色图 {result_image.shape[1]} × {result_image.shape[0]}")
-            
-            # 效果统计信息
-            with st.expander("📊 锐化效果统计", expanded=False):
-                col_stats1, col_stats2, col_stats3 = st.columns(3)
-                
-                with col_stats1:
-                    # 计算清晰度变化（基于梯度）
-                    def calculate_sharpness(image):
-                        """计算图像清晰度（基于梯度）"""
-                        if len(image.shape) == 3:
-                            # 彩色图像转为灰度
-                            if image.shape[2] == 3:
-                                gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-                            else:
-                                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                        else:
-                            gray = image
-                        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-                        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-                        gradient = np.sqrt(sobelx**2 + sobely**2)
-                        return np.mean(gradient)
-                    
-                    # 准备用于计算的图像
-                    if processing_mode == "灰度图像锐化":
-                        orig_for_calc = image_for_display
-                        proc_for_calc = result_image
-                    else:
-                        orig_for_calc = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-                        proc_for_calc = cv2.cvtColor(cv2.cvtColor(result_image, cv2.COLOR_RGB2BGR), cv2.COLOR_BGR2GRAY)
-                    
-                    orig_sharpness = calculate_sharpness(orig_for_calc)
-                    proc_sharpness = calculate_sharpness(proc_for_calc)
-                    improvement = (proc_sharpness - orig_sharpness) / orig_sharpness * 100
-                    
-                    st.metric("清晰度提升", f"{improvement:+.1f}%", 
-                             f"{orig_sharpness:.1f} → {proc_sharpness:.1f}")
-                
-                with col_stats2:
-                    # 亮度变化
-                    if processing_mode == "灰度图像锐化":
-                        orig_brightness = np.mean(image_for_display)
-                        proc_brightness = np.mean(result_image)
-                    else:
-                        orig_brightness = np.mean(image_for_display)
-                        proc_brightness = np.mean(result_image)
-                    brightness_change = proc_brightness - orig_brightness
-                    st.metric("亮度变化", f"{brightness_change:+.1f}",
-                             f"{orig_brightness:.1f} → {proc_brightness:.1f}")
-                
-                with col_stats3:
-                    # 对比度变化
-                    if processing_mode == "灰度图像锐化":
-                        orig_contrast = np.std(image_for_display)
-                        proc_contrast = np.std(result_image)
-                    else:
-                        orig_contrast = np.std(image_for_display, axis=(0,1)).mean()
-                        proc_contrast = np.std(result_image, axis=(0,1)).mean()
-                    contrast_change = proc_contrast - orig_contrast
-                    st.metric("对比度变化", f"{contrast_change:+.1f}",
-                             f"{orig_contrast:.1f} → {proc_contrast:.1f}")
-            
-            # 分割线
-            st.markdown("---")
+            if processing_mode == "灰度图像锐化":
+                # 对于灰度图像，需要转换为RGB用于直方图显示
+                display_comparison_with_histograms(
+                    cv2.cvtColor(image_for_display, cv2.COLOR_GRAY2RGB) if len(image_for_display.shape) == 2 else image_for_display,
+                    cv2.cvtColor(result_image, cv2.COLOR_GRAY2RGB) if len(result_image.shape) == 2 else result_image,
+                    original_title="原始图像",
+                    processed_title=f"{sharpen_method}结果"
+                )
+            else:
+                display_comparison_with_histograms(
+                    image_for_display,
+                    result_image,
+                    original_title="原始图像",
+                    processed_title=f"{sharpen_method}结果"
+                )
             
             # 下载选项
             st.markdown("### 📥 下载锐化结果")
@@ -3431,35 +3623,6 @@ with tabs[3]:
                     mime="image/jpeg",
                     use_container_width=True
                 )
-            
-            # 锐化预览
-            st.markdown("### 🔍 锐化效果预览")
-            preview_size = st.slider("预览区域大小", 100, 400, 200, key="preview_size")
-            
-            # 确保预览区域不超过图像尺寸
-            max_height, max_width = image_for_display.shape[:2]
-            preview_size = min(preview_size, max_height-200, max_width-200)
-            
-            # 选择预览区域
-            col_preview1, col_preview2 = st.columns(2)
-            
-            with col_preview1:
-                # 原始图像预览
-                st.markdown("#### 原始图像局部")
-                if len(image_for_display.shape) == 2:  # 灰度图
-                    preview_orig = image_for_display[100:100+preview_size, 100:100+preview_size]
-                else:  # 彩色图
-                    preview_orig = image_for_display[100:100+preview_size, 100:100+preview_size, :]
-                st.image(preview_orig, use_container_width=True, clamp=True)
-            
-            with col_preview2:
-                # 锐化结果预览
-                st.markdown("#### 锐化后局部")
-                if len(result_image.shape) == 2:  # 灰度图
-                    preview_sharp = result_image[100:100+preview_size, 100:100+preview_size]
-                else:  # 彩色图
-                    preview_sharp = result_image[100:100+preview_size, 100:100+preview_size, :]
-                st.image(preview_sharp, use_container_width=True, clamp=True)
     
     else:
         # 没有上传文件时的界面
@@ -3490,7 +3653,6 @@ with tabs[3]:
                 demo_sharp_bgr = apply_unsharp_masking(demo_blurred_bgr, 2.0, 1.5)
                 demo_sharp_gray = cv2.cvtColor(demo_sharp_bgr, cv2.COLOR_BGR2GRAY)
                 st.image(demo_sharp_gray, caption="锐化后的灰度图像", use_container_width=True, clamp=True)
-
 
 
 
@@ -3549,13 +3711,14 @@ with tabs[4]:
         
         # 显示采样结果
         if sampled_rgb is not None:
-            col1, col2 = st.columns(2)
-            with col1:
-                # 显示RGB原始图像
-                st.image(image_rgb, caption=f"原始图像 {image_rgb.shape[1]}x{image_rgb.shape[0]}", use_container_width=True)
-            with col2:
-                # 显示RGB采样结果
-                st.image(sampled_rgb, caption=f"采样后图像 {sampled_rgb.shape[1]}x{sampled_rgb.shape[0]}", use_container_width=True)
+            # 显示对比和直方图
+            st.markdown("### 🔽 采样效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                sampled_rgb, 
+                original_title=f"原始图像 {image_rgb.shape[1]}x{image_rgb.shape[0]}", 
+                processed_title=f"采样后图像 {sampled_rgb.shape[1]}x{sampled_rgb.shape[0]}"
+            )
             
             provide_download_button(
                 sampled_rgb, 
@@ -3566,13 +3729,14 @@ with tabs[4]:
         
         # 显示量化结果
         if quantized_rgb is not None:
-            col1, col2 = st.columns(2)
-            with col1:
-                # 显示RGB原始图像
-                st.image(image_rgb, caption="原始图像", use_container_width=True)
-            with col2:
-                # 显示RGB量化结果
-                st.image(quantized_rgb, caption=f"{quant_levels}级量化", use_container_width=True)
+            # 显示对比和直方图
+            st.markdown("### 🎚️ 量化效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                quantized_rgb, 
+                original_title="原始图像", 
+                processed_title=f"{quant_levels}级量化"
+            )
             
             provide_download_button(
                 quantized_rgb, 
@@ -3660,13 +3824,14 @@ with tabs[5]:
         
         # 显示结果和下载
         if result_rgb is not None:
-            col1, col2 = st.columns(2)
-            with col1:
-                # 显示RGB原始图像
-                st.image(image_rgb, caption="原始图像", use_container_width=True)
-            with col2:
-                # 显示RGB分割结果
-                st.image(result_rgb, caption=f"{color_space}结果", use_container_width=True)
+            # 显示对比和直方图
+            st.markdown(f"### 🎨 {color_space}效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                result_rgb, 
+                original_title="原始图像", 
+                processed_title=f"{color_space}结果"
+            )
             
             provide_download_button(
                 result_rgb, 
@@ -3782,13 +3947,14 @@ with tabs[6]:
         
         # 显示通道调整结果
         if result_rgb is not None:
-            col1, col2 = st.columns(2)
-            with col1:
-                # 显示RGB原始图像
-                st.image(image_rgb, caption="原始图像", use_container_width=True)
-            with col2:
-                # 显示RGB调整结果
-                st.image(result_rgb, caption=f"调整{channel_to_adjust}", use_container_width=True)
+            # 显示对比和直方图
+            st.markdown(f"### 🎛️ 通道调整效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                result_rgb, 
+                original_title="原始图像", 
+                processed_title=f"调整{channel_to_adjust}"
+            )
             
             provide_download_button(
                 result_rgb, 
@@ -3882,13 +4048,14 @@ with tabs[7]:
         
         # 显示结果和下载 - 使用result_rgb检查
         if result_rgb is not None:
-            col1, col2 = st.columns(2)
-            with col1:
-                # 显示RGB原始图像
-                st.image(image_rgb, caption="原始图像", use_container_width=True)
-            with col2:
-                # 显示RGB特效结果
-                st.image(result_rgb, caption=f"{effect_type}结果", use_container_width=True)
+            # 显示对比和直方图
+            st.markdown(f"### 🎭 {effect_type}效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                result_rgb, 
+                original_title="原始图像", 
+                processed_title=f"{effect_type}结果"
+            )
             
             # 下载时传递RGB版本
             provide_download_button(
@@ -4053,45 +4220,38 @@ with tabs[8]:
                 if result_rgb.dtype != np.uint8:
                     result_rgb = result_rgb.astype(np.uint8)
                 
-                # 创建对比展示
-                st.markdown("### 🖼️ 效果对比")
+                # 显示对比和直方图
+                st.markdown(f"### 🖼️ {painting_style}效果对比")
+                display_comparison_with_histograms(
+                    image_rgb, 
+                    result_rgb, 
+                    original_title="原始图像", 
+                    processed_title=f"{painting_style}"
+                )
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("#### 📷 原始图像")
-                    st.image(image_rgb, use_container_width=True)
-                with col2:
-                    st.markdown(f"#### 🎨 {painting_style}")
-                    st.image(result_rgb, use_container_width=True)
-                
-                # 分割线
-                st.markdown("---")
-                
-                # 简单的下载功能
-                st.markdown("### 📥 下载处理结果")
+                # 下载选项
+                st.markdown("### 📥 下载艺术作品")
                 
                 # 将结果转换为PIL图像
                 result_pil = Image.fromarray(result_rgb)
                 
-                # 将图像保存到字节流
-                img_buffer = io.BytesIO()
-                result_pil.save(img_buffer, format="JPEG", quality=90)
-                img_buffer.seek(0)
+                col_dl1, col_dl2, col_dl3 = st.columns(3)
                 
-                # 创建下载按钮
-                st.download_button(
-                    label="💾 下载处理结果",
-                    data=img_buffer,
-                    file_name=f"绘画_{painting_style}.jpg",
-                    mime="image/jpeg",
-                    use_container_width=True
-                )
+                with col_dl1:
+                    # JPEG格式
+                    img_buffer = io.BytesIO()
+                    result_pil.save(img_buffer, format="JPEG", quality=90)
+                    img_buffer.seek(0)
+                    
+                    st.download_button(
+                        label="💾 下载JPEG格式",
+                        data=img_buffer,
+                        file_name=f"绘画_{painting_style}.jpg",
+                        mime="image/jpeg",
+                        use_container_width=True
+                    )
                 
-                # 其他格式选项
-                st.markdown("##### 其他格式选项")
-                col1, col2 = st.columns(2)
-                
-                with col1:
+                with col_dl2:
                     # PNG格式
                     png_buffer = io.BytesIO()
                     result_pil.save(png_buffer, format="PNG")
@@ -4105,15 +4265,15 @@ with tabs[8]:
                         use_container_width=True
                     )
                 
-                with col2:
-                    # 高质量JPEG
-                    jpeg_high_buffer = io.BytesIO()
-                    result_pil.save(jpeg_high_buffer, format="JPEG", quality=100)
-                    jpeg_high_buffer.seek(0)
+                with col_dl3:
+                    # 高质量版本
+                    high_buffer = io.BytesIO()
+                    result_pil.save(high_buffer, format="JPEG", quality=100)
+                    high_buffer.seek(0)
                     
                     st.download_button(
                         label="🌟 最高质量",
-                        data=jpeg_high_buffer,
+                        data=high_buffer,
                         file_name=f"绘画_{painting_style}_高质量.jpg",
                         mime="image/jpeg",
                         use_container_width=True
@@ -4126,21 +4286,7 @@ with tabs[8]:
     else:
         # 没有上传文件时的界面
         st.info("📤 请上传图像文件开始处理")
-        
-        # 显示示例效果
-        with st.expander("🎨 查看各种风格效果示例", expanded=False):
-            st.markdown("""
-            ### 各种绘画风格示例
-            
-            1. **油画效果** - 模拟传统油画的厚重笔触
-            2. **铅笔素描** - 精细线条的黑白素描
-            3. **水墨画** - 中国传统文化的水墨风格
-            4. **漫画风格** - 动漫风格的鲜艳色彩
-            5. **水彩画** - 柔和的水彩晕染效果
-            6. **波普艺术** - 鲜艳的色彩和色块
-            
-            **提示**: 上传您的图像后，可以选择不同的风格，获得个性化的艺术效果！
-            """)
+
 # 10. 风格迁移选项卡
 with tabs[9]:
     st.markdown("### 🌟 风格迁移与艺术化")
@@ -4180,7 +4326,7 @@ with tabs[9]:
         if style_type == "梵高风格":
             col1, col2 = st.columns(2)
             with col1:
-                twist_strength = st.slider("扭曲强度", 0.0005, 0.002, 0.001, 0.0001, 
+                twist_strength = st.slider("扭曲强度", 0.001, 0.02, 0.01, 0.0001, 
                                           key="vangogh_twist")
             with col2:
                 color_intensity = st.slider("色彩强度", 0.5, 2.0, 1.5, 0.1, 
@@ -4300,126 +4446,19 @@ with tabs[9]:
         
         # 显示结果和下载
         if result_rgb is not None:
-            # 艺术信息卡片
-            with st.expander("🎨 艺术风格介绍", expanded=False):
-                if style_type == "梵高风格":
-                    st.markdown("""
-                    **文森特·梵高** - 荷兰后印象派画家
-                    - 特点：强烈的色彩、旋转的笔触、情感表达
-                    - 代表作：《星空》、《向日葵》
-                    """)
-                elif style_type == "星空风格":
-                    st.markdown("""
-                    **梵高《星空》风格**
-                    - 特点：旋涡状的天空、明亮的星星、蓝色基调
-                    - 技术：油画技法和独特的视角
-                    """)
-                elif style_type == "莫奈印象派":
-                    st.markdown("""
-                    **克劳德·莫奈** - 法国印象派创始人
-                    - 特点：捕捉光影变化、柔和的色彩、笔触明显
-                    - 代表作：《睡莲》、《日出·印象》
-                    """)
-                elif style_type == "毕加索立体主义":
-                    st.markdown("""
-                    **巴勃罗·毕加索** - 西班牙立体主义画家
-                    - 特点：几何分解、多视角融合、色彩简化
-                    - 代表作：《亚威农少女》、《格尔尼卡》
-                    """)
-                else:  # 动漫风格
-                    st.markdown("""
-                    **动漫艺术风格**
-                    - 特点：平坦着色、黑色轮廓、夸张的表情
-                    - 技术：赛璐珞动画风格、线条清晰
-                    """)
-            
-            # 效果对比展示
-            st.markdown("### 🖼️ 艺术效果对比")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                # 原始图像
-                st.markdown("#### 📷 原始图像")
-                st.image(image_rgb, use_container_width=True)
-                
-                # 添加艺术处理建议
-                with st.expander("💡 艺术处理建议", expanded=False):
-                    st.write("""
-                    1. **人像照片**：适合动漫风格、莫奈风格
-                    2. **风景照片**：适合梵高风格、星空风格
-                    3. **建筑照片**：适合毕加索立体主义风格
-                    4. **色彩丰富**：适合所有艺术风格
-                    """)
-            
-            with col2:
-                # 艺术结果
-                st.markdown(f"#### 🎨 {style_type}")
-                st.image(result_rgb, use_container_width=True)
-                
-                # 艺术效果分析
-                with st.expander("📊 艺术效果分析", expanded=False):
-                    # 计算一些艺术特征
-                    brightness = np.mean(result_rgb)
-                    contrast = np.std(result_rgb)
-                    
-                    # 颜色丰富度
-                    unique_colors = len(np.unique(result_rgb.reshape(-1, 3), axis=0))
-                    
-                    st.write(f"亮度: {brightness:.1f}")
-                    st.write(f"对比度: {contrast:.1f}")
-                    st.write(f"颜色数量: {unique_colors}")
-                    
-                    # 风格评估
-                    if style_type == "动漫风格":
-                        edge_pixels = np.sum(cv2.Canny(cv2.cvtColor(result_rgb, cv2.COLOR_RGB2GRAY), 50, 150) > 0)
-                        st.write(f"轮廓强度: {edge_pixels/(result_rgb.shape[0]*result_rgb.shape[1]):.2%}")
-            
-            # 分割线
-            st.markdown("---")
-            
-            # 艺术创作选项
-            st.markdown("### 🎨 艺术创作选项")
-            
-            # 增强效果选项
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                enhance_style = st.selectbox("增强效果", 
-                                           ["无", "增强对比度", "添加画框", "添加签名"],
-                                           key="enhance_style")
-            
-            if enhance_style == "增强对比度":
-                with col2:
-                    contrast_level = st.slider("对比度级别", 0.5, 2.0, 1.2, 0.1, key="art_contrast")
-            elif enhance_style == "添加画框":
-                with col2:
-                    frame_type = st.selectbox("画框类型", ["古典", "现代", "简约"], key="frame_type")
-            
-            # 处理增强
-            if st.button("✨ 应用增强效果", use_container_width=True, key="enhance_btn"):
-                enhanced_rgb = result_rgb.copy()
-                
-                if enhance_style == "增强对比度":
-                    enhanced_rgb = cv2.convertScaleAbs(enhanced_rgb, alpha=contrast_level)
-                elif enhance_style == "添加画框":
-                    # 添加简单的画框效果
-                    h, w = enhanced_rgb.shape[:2]
-                    frame_color = (50, 50, 50) if frame_type == "简约" else \
-                                 (139, 69, 19) if frame_type == "古典" else \
-                                 (200, 200, 200)
-                    
-                    frame_size = 20
-                    enhanced_rgb[:frame_size, :] = frame_color
-                    enhanced_rgb[-frame_size:, :] = frame_color
-                    enhanced_rgb[:, :frame_size] = frame_color
-                    enhanced_rgb[:, -frame_size:] = frame_color
-                
-                result_rgb = enhanced_rgb
-                st.success("增强效果已应用！")
+            # 显示对比和直方图
+            st.markdown(f"### 🎨 {style_type}效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                result_rgb, 
+                original_title="原始图像", 
+                processed_title=f"{style_type}"
+            )
             
             # 下载选项
             st.markdown("### 📥 艺术创作下载")
             
-            download_cols = st.columns(4)
+            download_cols = st.columns(3)
             with download_cols[0]:
                 provide_download_button(
                     result_rgb, 
@@ -4439,61 +4478,19 @@ with tabs[9]:
                 )
             
             with download_cols[2]:
-                # 社交媒体版本
-                social_size = (1080, 1080)
-                social_img = cv2.resize(result_rgb, social_size)
-                provide_download_button(
-                    social_img, 
-                    f"艺术_{style_type}_社交媒体.jpg",  # 修改这里：styleType -> style_type
-                    "📱 社交媒体版",
-                    unique_key_suffix="art_social"
-                )
-            
-            with download_cols[3]:
-                # 打印版本（高分辨率）
-                if result_rgb.shape[0] > 1000:
-                    print_img = result_rgb
-                else:
-                    print_img = cv2.resize(result_rgb, 
-                                          (result_rgb.shape[1]*2, result_rgb.shape[0]*2))
-                provide_download_button(
-                    print_img, 
-                    f"艺术_{style_type}_打印版.jpg", 
-                    "🖨️ 打印版本",
-                    unique_key_suffix="art_print"
-                )
-            
-            # 艺术画廊展示
-            with st.expander("🖼️ 其他风格预览", expanded=False):
-                preview_cols = st.columns(5)
-                preview_styles = ["梵高风格", "星空风格", "莫奈印象派", 
-                                 "毕加索立体主义", "动漫风格"]
+                # 高质量版本
+                high_buffer = io.BytesIO()
+                result_pil = Image.fromarray(result_rgb)
+                result_pil.save(high_buffer, format="JPEG", quality=100)
+                high_buffer.seek(0)
                 
-                for idx, (col, preview_style) in enumerate(zip(preview_cols, preview_styles)):
-                    with col:
-                        st.caption(preview_style)
-                        
-                        # 创建小预览
-                        preview_size = (120, 120)
-                        
-                        if preview_style == "梵高风格":
-                            preview_img = apply_van_gogh_style(image_bgr[:100, :100], 0.001)
-                            preview_rgb = cv2.cvtColor(preview_img, cv2.COLOR_BGR2RGB)
-                        elif preview_style == "星空风格":
-                            preview_img = apply_starry_sky_style(image_bgr[:100, :100])
-                            preview_rgb = cv2.cvtColor(preview_img, cv2.COLOR_BGR2RGB)
-                        elif preview_style == "莫奈印象派":
-                            preview_img = apply_monet_style(image_bgr[:100, :100])
-                            preview_rgb = cv2.cvtColor(preview_img, cv2.COLOR_BGR2RGB)
-                        elif preview_style == "毕加索立体主义":
-                            preview_img = apply_picasso_cubist_style(image_bgr[:100, :100])
-                            preview_rgb = cv2.cvtColor(preview_img, cv2.COLOR_BGR2RGB)
-                        else:  # 动漫风格
-                            preview_img = apply_anime_style(image_bgr[:100, :100])
-                            preview_rgb = cv2.cvtColor(preview_img, cv2.COLOR_BGR2RGB)
-                        
-                        st.image(cv2.resize(preview_rgb, preview_size), 
-                                use_container_width=True)
+                st.download_button(
+                    label="🌟 最高质量",
+                    data=high_buffer,
+                    file_name=f"艺术_{style_type}_高质量.jpg",
+                    mime="image/jpeg",
+                    use_container_width=True
+                )
     else:
         st.info("📤 请上传图像文件开始艺术创作")
         
@@ -4603,62 +4600,6 @@ with tabs[10]:
             ai_assist = st.checkbox("启用AI智能识别", True,
                                    help="使用智能算法识别图像内容")
         
-        # 如果需要强制去色
-        process_image = image_bgr.copy()
-        if force_grayscale and is_colorful:
-            # 转换为灰度图
-            gray = cv2.cvtColor(process_image, cv2.COLOR_BGR2GRAY)
-            # 将灰度图转换为三通道BGR
-            process_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        
-        # 使用新的老照片上色函数
-        def enhanced_colorize_old_photo(image, mode="智能上色", color_intensity=1.0, 
-                                       saturation=1.2, brightness=0, contrast=1.0, 
-                                       denoise=3, ai_assist=True):
-            """增强版老照片上色，真正实现黑白转彩色"""
-            # 根据模式选择不同的上色方法
-            if mode == "AI增强上色":
-                # 使用我提供的完整AI上色函数
-                result = colorize_old_photo(image, color_intensity, ai_assist)
-                
-            elif mode == "智能上色":
-                # 使用优化的智能上色
-                result = smart_colorize_photo(image, color_intensity)
-                
-            elif mode == "复古色调":
-                # 先上色，然后添加复古滤镜
-                base_colored = smart_colorize_photo(image, color_intensity)
-                result = apply_vintage_filter(base_colored)
-                
-            elif mode == "鲜艳色调":
-                # 鲜艳风格上色
-                base_colored = smart_colorize_photo(image, color_intensity)
-                result = enhance_color_vibrance(base_colored, saturation * 1.5)
-                
-            else:  # 自然色调
-                # 自然风格上色
-                base_colored = smart_colorize_photo(image, color_intensity * 0.8)
-                result = apply_natural_tones(base_colored)
-            
-            # 应用饱和度调整
-            hsv = cv2.cvtColor(result, cv2.COLOR_BGR2HSV)
-            hsv[:,:,1] = cv2.multiply(hsv[:,:,1], saturation).clip(0, 255)
-            
-            # 应用亮度和对比度调整
-            hsv[:,:,2] = cv2.addWeighted(
-                hsv[:,:,2], contrast, 
-                np.zeros_like(hsv[:,:,2]), 0, 
-                brightness
-            ).clip(0, 255)
-            
-            result = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-            
-            # 应用降噪
-            if denoise > 0:
-                result = cv2.bilateralFilter(result, 9, denoise*25, denoise*25)
-            
-            return result
-        
         # 辅助函数
         def smart_colorize_photo(image, color_intensity=1.0):
             """优化的智能上色函数"""
@@ -4763,16 +4704,28 @@ with tabs[10]:
             if st.button("🎨 应用上色效果", use_container_width=True):
                 with st.spinner("正在智能上色中..."):
                     # 使用BGR图像处理
-                    result_bgr = enhanced_colorize_old_photo(
-                        process_image, 
-                        mode=colorize_mode,
-                        color_intensity=color_intensity,
-                        saturation=saturation,
-                        brightness=brightness,
-                        contrast=contrast,
-                        denoise=denoise_strength,
-                        ai_assist=ai_assist
-                    )
+                    process_image = image_bgr.copy()
+                    if force_grayscale and is_colorful:
+                        # 转换为灰度图
+                        gray = cv2.cvtColor(process_image, cv2.COLOR_BGR2GRAY)
+                        # 将灰度图转换为三通道BGR
+                        process_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+                    
+                    # 根据模式选择不同的上色方法
+                    if colorize_mode == "AI增强上色":
+                        result_bgr = colorize_old_photo(process_image, color_intensity, ai_assist)
+                    elif colorize_mode == "智能上色":
+                        result_bgr = smart_colorize_photo(process_image, color_intensity)
+                    elif colorize_mode == "复古色调":
+                        base_colored = smart_colorize_photo(process_image, color_intensity)
+                        result_bgr = apply_vintage_filter(base_colored)
+                    elif colorize_mode == "鲜艳色调":
+                        base_colored = smart_colorize_photo(process_image, color_intensity)
+                        result_bgr = enhance_color_vibrance(base_colored, saturation * 1.5)
+                    else:  # 自然色调
+                        base_colored = smart_colorize_photo(process_image, color_intensity * 0.8)
+                        result_bgr = apply_natural_tones(base_colored)
+                    
                     # 转换为RGB用于显示
                     result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
                     
@@ -4789,49 +4742,16 @@ with tabs[10]:
         
         # 显示结果
         if 'colorize_result_rgb' in st.session_state:
-            st.markdown("### 🎉 上色结果对比")
+            result_rgb = st.session_state.colorize_result_rgb
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(image_rgb, caption="原始照片", use_container_width=True)
-                
-                # 显示原始图像信息
-                with st.expander("📊 原始图像信息", expanded=False):
-                    st.write(f"尺寸: {image_rgb.shape[1]} × {image_rgb.shape[0]}")
-                    st.write(f"亮度: {np.mean(image_rgb):.1f}")
-                    st.write(f"对比度: {np.std(image_rgb):.1f}")
-            
-            with col2:
-                result_rgb = st.session_state.colorize_result_rgb
-                st.image(result_rgb, 
-                        caption=f"上色结果 ({colorize_mode})", 
-                        use_container_width=True)
-                
-                # 显示处理后的图像信息
-                with st.expander("📊 上色后图像信息", expanded=False):
-                    st.write(f"尺寸: {result_rgb.shape[1]} × {result_rgb.shape[0]}")
-                    st.write(f"亮度: {np.mean(result_rgb):.1f}")
-                    st.write(f"对比度: {np.std(result_rgb):.1f}")
-                    
-                    # 计算颜色丰富度
-                    unique_colors = len(np.unique(result_rgb.reshape(-1, 3), axis=0))
-                    st.write(f"颜色数量: {unique_colors}")
-                    
-                    # 计算饱和度变化
-                    if len(image_rgb.shape) == 3:
-                        # 计算原始图像饱和度
-                        hsv_orig = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
-                        sat_orig = np.mean(hsv_orig[:,:,1])
-                        
-                        # 计算处理后饱和度
-                        hsv_result = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2HSV)
-                        sat_result = np.mean(hsv_result[:,:,1])
-                        
-                        sat_change = ((sat_result - sat_orig) / sat_orig * 100) if sat_orig > 0 else 0
-                        st.write(f"饱和度变化: {sat_change:+.1f}%")
-            
-            # 分割线
-            st.markdown("---")
+            # 显示对比和直方图
+            st.markdown(f"### 🎨 {colorize_mode}上色效果对比")
+            display_comparison_with_histograms(
+                image_rgb, 
+                result_rgb, 
+                original_title="原始照片", 
+                processed_title=f"上色结果 ({colorize_mode})"
+            )
             
             # 下载选项
             st.markdown("### 📥 下载上色结果")
@@ -4874,65 +4794,9 @@ with tabs[10]:
                     mime="image/jpeg",
                     use_container_width=True
                 )
-            
-            # 添加处理建议
-            st.markdown("### 💡 上色处理建议")
-            
-            tips_cols = st.columns(2)
-            with tips_cols[0]:
-                st.markdown("""
-                **👤 人像照片建议:**
-                - 使用 **自然色调** 或 **智能上色**
-                - 饱和度: 1.0-1.3
-                - 色彩强度: 0.8-1.0
-                - 启用AI智能识别
-                """)
-            
-            with tips_cols[1]:
-                st.markdown("""
-                **🏞️ 风景照片建议:**
-                - 使用 **鲜艳色调** 或 **AI增强上色**
-                - 饱和度: 1.2-1.5
-                - 色彩强度: 1.0-1.3
-                - 对比度: 1.1-1.3
-                """)
     else:
         # 没有上传文件时的界面
         st.info("📤 请上传黑白或老旧照片开始上色")
-        
-        # 显示示例
-        if st.checkbox("显示上色示例", key="colorize_demo"):
-            st.markdown("### 📝 老照片上色示例")
-            
-            # 创建示例黑白图像
-            demo_image_gray = np.ones((300, 400), dtype=np.uint8) * 150
-            cv2.putText(demo_image_gray, "Old Photo", (120, 150), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.5, 100, 3)
-            
-            # 转换为彩色用于显示
-            demo_gray_bgr = cv2.cvtColor(demo_image_gray, cv2.COLOR_GRAY2BGR)
-            demo_gray_rgb = cv2.cvtColor(demo_gray_bgr, cv2.COLOR_BGR2RGB)
-            
-            # 应用简单上色
-            demo_lab = cv2.cvtColor(demo_gray_bgr, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(demo_lab)
-            
-            # 添加颜色
-            a = np.full_like(a, 140)
-            b = np.full_like(b, 120)
-            
-            demo_colored_lab = cv2.merge([l, a, b])
-            demo_colored_bgr = cv2.cvtColor(demo_colored_lab, cv2.COLOR_LAB2BGR)
-            demo_colored_rgb = cv2.cvtColor(demo_colored_bgr, cv2.COLOR_BGR2RGB)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(demo_gray_rgb, caption="示例黑白照片", use_container_width=True)
-            with col2:
-                st.image(demo_colored_rgb, caption="上色后效果", use_container_width=True)    
-
-
-
 
 # 12. 数字形态学选项卡
 with tabs[11]:
@@ -4990,21 +4854,19 @@ with tabs[11]:
         # 转换为RGB用于显示和下载
         result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
         
-        col1, col2 = st.columns(2)
-        with col1:
-            # 显示RGB原始图像
-            st.image(image_rgb, caption="原始图像（已二值化）", use_container_width=True)
-        with col2:
-            # 显示RGB处理结果
-            st.image(result_rgb, caption=f"{operation}结果", use_container_width=True)
+        # 显示对比和直方图
+        st.markdown(f"### ⚙️ {operation}效果对比")
+        display_comparison_with_histograms(
+            image_rgb, 
+            result_rgb, 
+            original_title="原始图像（已二值化）", 
+            processed_title=f"{operation}结果"
+        )
         
         # 下载时传递RGB版本
         provide_download_button(result_rgb, f"morphology_{operation}.jpg", "📥 下载结果")
     else:
         st.info("请上传图像文件开始处理")
-
-
-
 
 # 底部思政总结
 st.markdown("---")

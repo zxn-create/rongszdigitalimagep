@@ -1506,31 +1506,31 @@ def render_sidebar():
         # 快速导航
         st.markdown("### 🧭 快速导航")
         
-        if st.button("🏠 返回首页", use_container_width=True):
+        if st.button("🏠 返回首页", width='stretch'):
             st.switch_page("main.py")
         
         if st.session_state.logged_in:
             role = st.session_state.role
             
             if role == "teacher":
-                if st.button("📊 教师控制台", use_container_width=True):
+                if st.button("📊 教师控制台", width='stretch'):
                     st.session_state.current_page = "teacher_dashboard"
                     st.rerun()
-                if st.button("➕ 创建班级", use_container_width=True):
+                if st.button("➕ 创建班级", width='stretch'):
                     st.session_state.current_page = "create_classroom"
                     st.rerun()
-                if st.button("📝 创建签到", use_container_width=True):
+                if st.button("📝 创建签到", width='stretch'):
                     st.session_state.current_page = "create_attendance"
                     st.rerun()
             
             elif role == "student":
-                if st.button("🎯 我的班级", use_container_width=True):
+                if st.button("🎯 我的班级", width='stretch'):
                     st.session_state.current_page = "student_classes"
                     st.rerun()
-                if st.button("📱 在线签到", use_container_width=True):
+                if st.button("📱 在线签到", width='stretch'):
                     st.session_state.current_page = "attendance_checkin"
                     st.rerun()
-                if st.button("🔍 查找班级", use_container_width=True):
+                if st.button("🔍 查找班级", width='stretch'):
                     st.session_state.current_page = "find_classroom"
                     st.rerun()
         
@@ -1620,7 +1620,6 @@ def render_teacher_dashboard():
     """, unsafe_allow_html=True)
     
     username = st.session_state.username
-
 
 
 
@@ -1778,12 +1777,12 @@ def render_teacher_dashboard():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("➕ 创建新班级", use_container_width=True):
+            if st.button("➕ 创建新班级", width='stretch'):
                 st.session_state.current_page = "create_classroom"
                 st.rerun()
         
         with col2:
-            if st.button("📝 创建签到", use_container_width=True):
+            if st.button("📝 创建签到", width='stretch'):
                 st.session_state.current_page = "create_attendance"
                 st.rerun()
         
@@ -1793,7 +1792,7 @@ def render_teacher_dashboard():
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("➕ 创建我的第一个班级", use_container_width=True, type="primary"):
+            if st.button("➕ 创建我的第一个班级", width='stretch', type="primary"):
                 st.session_state.current_page = "create_classroom"
                 st.rerun()
 def update_classroom_info(class_code, teacher_username, class_name=None, description=None, max_students=None):
@@ -1927,10 +1926,10 @@ def render_create_classroom():
     col_btn1, col_btn2 = st.columns(2)
     
     with col_btn1:
-        create_btn = st.button("🚀 创建班级", use_container_width=True, type="primary")
+        create_btn = st.button("🚀 创建班级", width='stretch', type="primary")
     
     with col_btn2:
-        cancel_btn = st.button("❌ 取消", use_container_width=True)
+        cancel_btn = st.button("❌ 取消", width='stretch')
     
     if cancel_btn:
         st.session_state.current_page = "teacher_dashboard"
@@ -1953,13 +1952,13 @@ def render_create_classroom():
                     # 显示操作选项（不使用表单结构）
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("🏫 前往班级管理", use_container_width=True, key="go_to_manage"):
+                        if st.button("🏫 前往班级管理", width='stretch', key="go_to_manage"):
                             st.session_state.selected_class = result
                             st.session_state.current_page = "class_management"
                             st.rerun()
                     
                     with col2:
-                        if st.button("📝 立即创建签到", use_container_width=True, key="go_to_create_attendance"):
+                        if st.button("📝 立即创建签到", width='stretch', key="go_to_create_attendance"):
                             st.session_state.selected_class = result
                             st.session_state.current_page = "create_attendance"
                             st.rerun()
@@ -2157,7 +2156,7 @@ def render_class_management():
                 })
             
             df_members = pd.DataFrame(members_data)
-            st.dataframe(df_members, use_container_width=True, hide_index=True)
+            st.dataframe(df_members, width='stretch', hide_index=True)
             
             # 只有教师可以导出成员名单
             if is_teacher:
@@ -2167,7 +2166,7 @@ def render_class_management():
                     data=csv,
                     file_name=f"{class_code}_members.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width='stretch'
                 )
         else:
             st.info("暂无班级成员")
@@ -2183,7 +2182,7 @@ def render_class_management():
                 new_member = st.text_input("输入用户名添加成员", placeholder="请输入学生用户名", key="new_member_input")
             
             with col2:
-                if st.button("添加", use_container_width=True, key="add_member_btn"):
+                if st.button("添加", width='stretch', key="add_member_btn"):
                     if new_member:
                         success, msg = join_classroom(new_member, class_code)
                         if success:
@@ -2248,7 +2247,7 @@ def render_class_management():
         # 只有教师可以创建签到
         if is_teacher:
             st.markdown("---")
-            if st.button("➕ 创建新签到活动", use_container_width=True):
+            if st.button("➕ 创建新签到活动", width='stretch'):
                 st.session_state.current_page = "create_attendance"
                 st.rerun()
     
@@ -2284,7 +2283,7 @@ def render_class_management():
                 height=400
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("暂无数据可分析")
     
@@ -2302,8 +2301,6 @@ def render_class_management():
             new_class_name = st.text_input("班级名称", value=class_name, key="new_class_name")
             new_description = st.text_area("班级描述", value=description or "", height=100, key="new_description")
         
-
-
 
 
 
@@ -2385,10 +2382,10 @@ def render_create_attendance():
     col_btn1, col_btn2 = st.columns(2)
     
     with col_btn1:
-        create_btn = st.button("🚀 创建签到", use_container_width=True, type="primary", key="create_attendance_btn")
+        create_btn = st.button("🚀 创建签到", width='stretch', type="primary", key="create_attendance_btn")
     
     with col_btn2:
-        cancel_btn = st.button("❌ 取消", use_container_width=True, key="cancel_attendance_btn")
+        cancel_btn = st.button("❌ 取消", width='stretch', key="cancel_attendance_btn")
     
     if cancel_btn:
         st.session_state.current_page = "teacher_dashboard"
@@ -2434,11 +2431,11 @@ def render_create_attendance():
                     # 操作按钮
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("📋 复制签到代码", use_container_width=True, key="copy_code_btn"):
+                        if st.button("📋 复制签到代码", width='stretch', key="copy_code_btn"):
                             st.toast("签到代码已复制到剪贴板")
                     
                     with col2:
-                        if st.button("📊 查看签到详情", use_container_width=True, key="view_detail_btn"):
+                        if st.button("📊 查看签到详情", width='stretch', key="view_detail_btn"):
                             st.session_state.selected_session = result
                             st.session_state.current_page = "attendance_detail"
                             st.rerun()
@@ -2577,7 +2574,7 @@ def render_attendance_checkin():
                             """, unsafe_allow_html=True)
                         
                         with col2:
-                            if st.button("签到", key=f"checkin_{session_code}", use_container_width=True):
+                            if st.button("签到", key=f"checkin_{session_code}", width='stretch'):
                                 with st.spinner("正在签到..."):
                                     success, msg = check_in_attendance(
                                         session_code, 
@@ -2629,7 +2626,7 @@ def render_attendance_checkin():
             manual_code = st.text_input("输入签到代码", placeholder="请输入6位签到代码", key="manual_code_input")
         
         with col2:
-            if st.button("提交", use_container_width=True, key="manual_submit_btn"):
+            if st.button("提交", width='stretch', key="manual_submit_btn"):
                 if manual_code:
                     with st.spinner("正在验证签到代码..."):
                         success, msg = check_in_attendance(
@@ -2716,7 +2713,7 @@ def render_find_classroom():
                         if current_students >= max_students:
                             st.error("⚠️ 班级人数已满")
                         else:
-                            if st.button("🎯 加入班级", type="primary", use_container_width=True, key="join_class_btn"):
+                            if st.button("🎯 加入班级", type="primary", width='stretch', key="join_class_btn"):
                                 success, msg = join_classroom(st.session_state.username, class_code)
                                 if success:
                                     st.success(msg)
@@ -2859,7 +2856,7 @@ def render_subscription_plans():
                     """, unsafe_allow_html=True)
                     
                     if plan_code != "free":
-                        if st.button(f"选择{plan_name}", key=f"plan_{plan_code}", use_container_width=True):
+                        if st.button(f"选择{plan_name}", key=f"plan_{plan_code}", width='stretch'):
                             # 这里实现支付逻辑
                             st.info(f"选择套餐: {plan_name}")
                             # 在实际应用中，这里应该跳转到支付页面
@@ -2888,7 +2885,7 @@ def render_subscription_plans():
                 """, unsafe_allow_html=True)
             
             with col2:
-                if st.button("联系我们", use_container_width=True, key="contact_us_btn"):
+                if st.button("联系我们", width='stretch', key="contact_us_btn"):
                     st.info("请联系: business@example.com")
         
     except Exception as e:
@@ -2949,7 +2946,7 @@ def render_attendance_detail():
             })
         
         df_records = pd.DataFrame(records_data)
-        st.dataframe(df_records, use_container_width=True, hide_index=True)
+        st.dataframe(df_records, width='stretch', hide_index=True)
         
         # 导出数据
         csv = df_records.to_csv(index=False).encode('utf-8')
@@ -2958,7 +2955,7 @@ def render_attendance_detail():
             data=csv,
             file_name=f"attendance_{session_code}.csv",
             mime="text/csv",
-            use_container_width=True
+            width='stretch'
         )
     else:
         st.info("暂无签到记录")
@@ -2987,7 +2984,7 @@ def render_attendance_detail():
             height=300
         )
         
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width='stretch')
 
 def render_student_classes():
     """学生班级页面"""
@@ -3049,7 +3046,7 @@ def render_student_classes():
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("🔍 查找班级", use_container_width=True, type="primary"):
+            if st.button("🔍 查找班级", width='stretch', type="primary"):
                 st.session_state.current_page = "find_classroom"
                 st.rerun()
 
