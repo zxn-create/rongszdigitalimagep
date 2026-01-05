@@ -518,7 +518,7 @@ def view_record_detail(record):
     # 操作按钮
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("↩️ 返回记录列表", use_container_width=True):
+        if st.button("↩️ 返回记录列表", width='stretch'):
             st.session_state.view_record_id = None
             st.rerun()
 
@@ -556,14 +556,14 @@ def teacher_review_interface(record):
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            submit_review = st.form_submit_button("✅ 通过审核", use_container_width=True)
+            submit_review = st.form_submit_button("✅ 通过审核", width='stretch')
         with col2:
-            submit_return = st.form_submit_button("↩️ 退回修改", use_container_width=True)
+            submit_return = st.form_submit_button("↩️ 退回修改", width='stretch')
         with col3:
-            cancel_review = st.form_submit_button("❌ 取消", use_container_width=True)
+            cancel_review = st.form_submit_button("❌ 取消", width='stretch')
         with col4:
             # 添加返回按钮
-            return_button = st.form_submit_button("🔙 返回列表", use_container_width=True)
+            return_button = st.form_submit_button("🔙 返回列表", width='stretch')
         
         if submit_review:
             update_reflection_status(record['id'], 'reviewed', feedback, score, allow_view_score)
@@ -586,7 +586,7 @@ def teacher_review_interface(record):
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("↩️ 返回审核列表", use_container_width=True, key="return_to_list"):
+        if st.button("↩️ 返回审核列表", width='stretch', key="return_to_list"):
             st.session_state.edit_record_id = None
             st.rerun()
 
@@ -606,19 +606,23 @@ def render_sidebar():
         st.markdown("### 🧭 快速导航")
         
         # 修复导航按钮 - 使用正确的页面路径
-        if st.button("🏠 返回首页", use_container_width=True):
+        if st.button("🏠 返回首页", width='stretch'):
             st.switch_page("main.py")
-        if st.button("🔬 图像处理实验室", use_container_width=True):
+        if st.button("🔬 图像处理实验室", width='stretch'):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("🏫加入班级与在线签到", use_container_width=True):
+        if st.button("📝 智能与传统图片处理", use_container_width=True):
+            # 使用JavaScript在新标签页打开链接
+            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
+            st.components.v1.html(js, height=0)
+        if st.button("🏫加入班级与在线签到", width='stretch'):
             st.switch_page("pages/分班和在线签到.py")
-        if st.button("📤 实验作业提交", use_container_width=True):
+        if st.button("📤 实验作业提交", width='stretch'):
             st.switch_page("pages/实验作业提交.py")
-        if st.button("📚 学习资源中心", use_container_width=True):
+        if st.button("📚 学习资源中心", width='stretch'):
             st.switch_page("pages/2_📚_学习资源中心.py")
-        if st.button("📝 我的思政足迹", use_container_width=True):
+        if st.button("📝 我的思政足迹", width='stretch'):
             st.switch_page("pages/3_📝_我的思政足迹.py")
-        if st.button("🏆 成果展示", use_container_width=True):
+        if st.button("🏆 成果展示", width='stretch'):
             st.switch_page("pages/4_🏆_成果展示.py")
         
         # 个人成就统计（学生端显示）
@@ -709,7 +713,7 @@ def render_learning_analysis():
             labels={'date': '日期', 'duration': '学习时长(小时)'}
         )
         fig1.update_traces(line_color='#dc2626', line_width=3)
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width='stretch')
     
     with col2:
         # 思政关联分布
@@ -720,7 +724,7 @@ def render_learning_analysis():
             title='🇨🇳 思政关联分布',
             color_discrete_sequence=px.colors.sequential.Reds
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width='stretch')
     
     # 学习主题词云（模拟）
     st.markdown("### 🔥 热门学习主题")
@@ -735,6 +739,7 @@ def render_learning_analysis():
                 <p>学习次数: {np.random.randint(5, 20)}</p>
             </div>
             """, unsafe_allow_html=True)
+
 
 # 历史记录功能（学生和教师共用）
 def render_history_records():
@@ -788,16 +793,16 @@ def render_history_records():
                     # 操作按钮
                     col1, col2, col3 = st.columns([1, 1, 1])
                     with col1:
-                        if st.button("👁️ 查看详情", key=f"view_db_{record['id']}", use_container_width=True):
+                        if st.button("👁️ 查看详情", key=f"view_db_{record['id']}", width='stretch'):
                             st.session_state.view_record_id = record
                             st.rerun()
                     with col2:
                         if st.session_state.get('role') == 'teacher':
-                            if st.button("📝 审核评分", key=f"review_db_{record['id']}", use_container_width=True):
+                            if st.button("📝 审核评分", key=f"review_db_{record['id']}", width='stretch'):
                                 st.session_state.edit_record_id = record
                                 st.rerun()
                         elif st.session_state.get('role') == 'student' and record['status'] == 'pending':
-                            if st.button("🗑️ 撤回", key=f"delete_db_{record['id']}", use_container_width=True):
+                            if st.button("🗑️ 撤回", key=f"delete_db_{record['id']}", width='stretch'):
                                 delete_reflection(record['id'])
                                 st.success("✅ 记录已成功撤回！")
                                 st.rerun()
@@ -842,7 +847,7 @@ def render_history_records():
                     # 查看和删除按钮
                     col1, col2, col3 = st.columns([1, 1, 1])
                     with col2:
-                        if st.button("👁️ 查看详情", key=f"view_local_{i}", use_container_width=True):
+                        if st.button("👁️ 查看详情", key=f"view_local_{i}", width='stretch'):
                             st.session_state.view_record_id = {
                                 'student_username': st.session_state.username,
                                 'submission_time': record['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
@@ -854,7 +859,7 @@ def render_history_records():
                             }
                             st.rerun()
                     with col3:
-                        if st.button("🗑️ 删除", key=f"delete_local_{i}", use_container_width=True):
+                        if st.button("🗑️ 删除", key=f"delete_local_{i}", width='stretch'):
                             del st.session_state.learning_records[i]
                             st.success("✅ 记录已成功删除！")
                             st.rerun()
@@ -1056,7 +1061,7 @@ def render_student_interface():
                 height=100
             )
             
-            submitted = st.form_submit_button("💾 提交学习记录", use_container_width=True)
+            submitted = st.form_submit_button("💾 提交学习记录", width='stretch')
             if submitted:
                 if reflection.strip():
                     word_count = len(reflection.strip())
@@ -1208,11 +1213,11 @@ def render_teacher_interface():
                     # 操作按钮
                     col1, col2, col3 = st.columns([1, 1, 1])
                     with col1:
-                        if st.button("👁️ 查看详情", key=f"view_{record['id']}", use_container_width=True):
+                        if st.button("👁️ 查看详情", key=f"view_{record['id']}", width='stretch'):
                             st.session_state.view_record_id = record
                             st.rerun()
                     with col2:
-                        if st.button("📝 审核评分", key=f"review_{record['id']}", use_container_width=True):
+                        if st.button("📝 审核评分", key=f"review_{record['id']}", width='stretch'):
                             st.session_state.edit_record_id = record
                             st.rerun()
                     with col3:
@@ -1269,8 +1274,7 @@ def render_teacher_interface():
             title='学生提交状态分布',
             color_discrete_sequence=['#10b981', '#ef4444']
         )
-        st.plotly_chart(fig_submission, use_container_width=True)
-
+        st.plotly_chart(fig_submission, width='stretch')
 # 主页面内容
 def main():
     # 检查登录状态

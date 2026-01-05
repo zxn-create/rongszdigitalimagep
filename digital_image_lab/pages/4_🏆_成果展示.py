@@ -10,10 +10,6 @@ import tempfile
 import shutil
 import csv
 import io
-import base64
-import requests
-from github import Github, GithubException
-import time
 
 st.set_page_config(
     page_title="思政成果展示", 
@@ -21,28 +17,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# GitHub配置 - 添加错误处理
-GITHUB_USERNAME = "zxn-create"
-GITHUB_REPO_NAME = "rongszdigitalimagep"
-
-# 安全的获取 GitHub Token 方法
-def get_github_token():
-    """安全地获取 GitHub Token"""
-    try:
-        # 首先尝试从 Streamlit secrets 获取
-        return st.secrets.get("GITHUB_TOKEN", "")
-    except Exception as e:
-        # 如果在本地运行且没有 secrets.toml 文件
-        try:
-            # 尝试从环境变量获取
-            return os.environ.get("GITHUB_TOKEN", "")
-        except:
-            # 最后返回空字符串
-            print(f"警告: 无法获取 GitHub Token: {e}")
-            return ""
-
-GITHUB_TOKEN = get_github_token()
 
 # 设置时区为北京时间
 def get_beijing_time():
@@ -85,138 +59,6 @@ def format_beijing_time(timestamp):
         return timestamp.astimezone(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')
     
     return str(timestamp)
-
-# GitHub存储类 - 增强错误处理
-class GitHubStorage:
-    def __init__(self):
-        self.token = GITHUB_TOKEN
-        self.username = GITHUB_USERNAME
-        self.repo_name = GITHUB_REPO_NAME
-        self.repo = None
-        self.connected = False
-        self.error_message = ""
-        
-    def connect(self):
-        """连接到GitHub仓库"""
-        try:
-            if not self.token:
-                self.error_message = "GitHub Token未配置"
-                return False
-            
-            g = Github(self.token)
-            self.repo = g.get_user().get_repo(self.repo_name)
-            self.connected = True
-            self.error_message = ""
-            return True
-        except GithubException as e:
-            if e.status == 404:
-                self.error_message = f"GitHub仓库 '{self.repo_name}' 不存在"
-            elif e.status == 401:
-                self.error_message = "GitHub Token无效或过期"
-            else:
-                self.error_message = f"GitHub连接失败: {str(e)}"
-            return False
-        except Exception as e:
-            self.error_message = f"连接到GitHub失败: {str(e)}"
-            return False
-    
-    def save_file_to_github(self, file_content, file_path, commit_message=None):
-        """保存文件到GitHub"""
-        if not self.connected:
-            if not self.connect():
-                return False
-        
-        try:
-            # 检查文件是否存在
-            try:
-                contents = self.repo.get_contents(file_path)
-                # 文件存在，更新
-                self.repo.update_file(
-                    file_path,
-                    commit_message or f"更新文件 {os.path.basename(file_path)}",
-                    file_content,
-                    contents.sha
-                )
-            except:
-                # 文件不存在，创建
-                self.repo.create_file(
-                    file_path,
-                    commit_message or f"创建文件 {os.path.basename(file_path)}",
-                    file_content
-                )
-            return True
-        except Exception as e:
-            self.error_message = f"保存到GitHub失败: {str(e)}"
-            return False
-    
-    def save_binary_file(self, file_data, file_path, commit_message=None):
-        """保存二进制文件到GitHub"""
-        if not self.connected:
-            if not self.connect():
-                return False
-        
-        try:
-            # 将二进制文件转换为base64
-            content = base64.b64encode(file_data).decode('utf-8')
-            
-            # 检查文件是否存在
-            try:
-                contents = self.repo.get_contents(file_path)
-                # 文件存在，更新
-                self.repo.update_file(
-                    file_path,
-                    commit_message or f"更新文件 {os.path.basename(file_path)}",
-                    content,
-                    contents.sha
-                )
-            except:
-                # 文件不存在，创建
-                self.repo.create_file(
-                    file_path,
-                    commit_message or f"创建文件 {os.path.basename(file_path)}",
-                    content
-                )
-            return True
-        except Exception as e:
-            self.error_message = f"保存二进制文件到GitHub失败: {str(e)}"
-            return False
-    
-    def get_file_from_github(self, file_path):
-        """从GitHub获取文件"""
-        if not self.connected:
-            if not self.connect():
-                return None
-        
-        try:
-            contents = self.repo.get_contents(file_path)
-            return contents.decoded_content
-        except:
-            return None
-    
-    def list_files(self, folder_path=""):
-        """列出GitHub仓库中的文件"""
-        if not self.connected:
-            if not self.connect():
-                return []
-        
-        try:
-            contents = self.repo.get_contents(folder_path)
-            files = []
-            for content in contents:
-                files.append({
-                    'name': content.name,
-                    'path': content.path,
-                    'type': content.type,
-                    'size': content.size,
-                    'sha': content.sha,
-                    'url': content.html_url
-                })
-            return files
-        except:
-            return []
-
-# 创建GitHub存储实例
-github_storage = GitHubStorage()
 
 # 现代化米色思政主题CSS
 def apply_modern_css():
@@ -444,17 +286,6 @@ def apply_modern_css():
         font-weight: 600;
     }
     
-    /* GitHub存储状态 */
-    .github-status {
-        background: linear-gradient(135deg, #24292e, #2d333b);
-        color: white;
-        padding: 10px;
-        border-radius: 10px;
-        font-size: 0.9rem;
-        margin: 10px 0;
-        text-align: center;
-    }
-    
     /* 响应式设计 */
     @media (max-width: 768px) {
         .main-title {
@@ -490,25 +321,28 @@ def init_database():
                     review_notes TEXT,
                     review_time TIMESTAMP,
                     reviewer TEXT,
-                    user_id INTEGER,
-                    github_paths TEXT  -- 新增：GitHub存储路径
+                    user_id INTEGER
                 )
             ''')
         else:
             # 检查并添加缺失的字段
-            columns_to_add = [
-                ('file_paths', 'TEXT'),
-                ('reviewer', 'TEXT'),
-                ('user_id', 'INTEGER'),
-                ('github_paths', 'TEXT')
-            ]
+            if 'file_paths' not in existing_columns:
+                try:
+                    c.execute('ALTER TABLE submitted_projects ADD COLUMN file_paths TEXT')
+                except:
+                    pass
             
-            for column_name, column_type in columns_to_add:
-                if column_name not in existing_columns:
-                    try:
-                        c.execute(f'ALTER TABLE submitted_projects ADD COLUMN {column_name} {column_type}')
-                    except:
-                        pass
+            if 'reviewer' not in existing_columns:
+                try:
+                    c.execute('ALTER TABLE submitted_projects ADD COLUMN reviewer TEXT')
+                except:
+                    pass
+            
+            if 'user_id' not in existing_columns:
+                try:
+                    c.execute('ALTER TABLE submitted_projects ADD COLUMN user_id INTEGER')
+                except:
+                    pass
         
         # 创建意见反馈表
         c.execute('''
@@ -517,8 +351,7 @@ def init_database():
                 feedback_content TEXT NOT NULL,
                 submit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 ip_address TEXT,
-                user_agent TEXT,
-                github_synced BOOLEAN DEFAULT 0  -- 新增：GitHub同步状态
+                user_agent TEXT
             )
         ''')
         
@@ -530,18 +363,6 @@ def init_database():
                 password TEXT NOT NULL,
                 role TEXT DEFAULT 'student',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # 创建GitHub同步记录表
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS github_sync (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                table_name TEXT NOT NULL,
-                record_id INTEGER NOT NULL,
-                github_path TEXT NOT NULL,
-                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(table_name, record_id)
             )
         ''')
         
@@ -564,44 +385,32 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
-        # 显示GitHub存储状态
-        if github_storage.connect():
-            st.markdown("""
-            <div class='github-status'>
-                ✅ GitHub存储已连接<br>
-                <small>数据永久保存</small>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div class='github-status'>
-                ⚠️ GitHub存储未连接<br>
-                <small>{github_storage.error_message or '本地运行模式'}</small>
-            </div>
-            """, unsafe_allow_html=True)
-        
         # 快速导航
         st.markdown("### 🧭 快速导航")
         
-        if st.button("🏠 返回首页", width='stretch'):
+        if st.button("🏠 返回首页", width='content'):
             st.switch_page("main.py")
-        if st.button("🔬 图像处理实验室", width='stretch'):
+        if st.button("🔬 图像处理实验室", width='content'):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("🏫加入班级与在线签到", use_container_width=True):
+        if st.button("📝 智能与传统图片处理", use_container_width=True):
+            # 使用JavaScript在新标签页打开链接
+            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
+            st.components.v1.html(js, height=0)
+        if st.button("🏫 加入班级与在线签到", width='content'):
             st.switch_page("pages/分班和在线签到.py")
-        if st.button("📤 实验作业提交", width='stretch'):
+        if st.button("📤 实验作业提交", width='content'):
             st.switch_page("pages/实验作业提交.py")            
-        if st.button("📚 学习资源中心", width='stretch'):
+        if st.button("📚 学习资源中心", width='content'):
             st.switch_page("pages/2_📚_学习资源中心.py")
-        if st.button("📝 我的思政足迹", width='stretch'):
+        if st.button("📝 我的思政足迹", width='content'):
             st.switch_page("pages/3_📝_我的思政足迹.py")
-        if st.button("🏆 成果展示", width='stretch'):
+        if st.button("🏆 成果展示", width='content'):
             st.switch_page("pages/4_🏆_成果展示.py")
         
         # 用户提交记录查看
         if "logged_in" in st.session_state and st.session_state.logged_in:
             st.markdown("---")
-            if st.button("📋 我的提交记录", width='stretch'):
+            if st.button("📋 我的提交记录", width='content'):
                 st.session_state.show_my_projects = True
                 st.rerun()
         
@@ -609,7 +418,7 @@ def render_sidebar():
         if "logged_in" in st.session_state and st.session_state.logged_in:
             if verify_teacher_role(st.session_state.username):
                 st.markdown("---")
-                if st.button("🔧 进入教师后台", width='stretch', type="primary"):
+                if st.button("🔧 进入教师后台", width='content', type="primary"):
                     st.session_state.show_admin = True
                     st.rerun()
         
@@ -642,7 +451,7 @@ def render_sidebar():
         ]
         
         for topic in theory_topics:
-            if st.button(f"📖 {topic}", key=f"theory_{topic}", width='stretch'):
+            if st.button(f"📖 {topic}", key=f"theory_{topic}", width='content'):
                 st.info(f"开始学习：{topic}")
         
         st.markdown("---")
@@ -735,63 +544,6 @@ def get_user_id(username):
     except:
         return None
 
-def sync_data_to_github(table_name, record_id, data):
-    """同步数据到GitHub"""
-    try:
-        if not github_storage.connect():
-            return False, "GitHub连接失败"
-            
-        timestamp = get_beijing_time().strftime('%Y%m%d_%H%M%S')
-        github_path = f"data/{table_name}/{timestamp}_{record_id}.json"
-        
-        # 将数据转换为JSON格式
-        json_data = json.dumps(data, ensure_ascii=False, indent=2)
-        
-        # 保存到GitHub
-        if github_storage.save_file_to_github(json_data, github_path, f"同步{table_name}数据_{record_id}"):
-            # 更新数据库中的GitHub路径
-            conn = sqlite3.connect('image_processing_platform.db')
-            c = conn.cursor()
-            
-            if table_name == 'submitted_projects':
-                c.execute('''UPDATE submitted_projects SET github_paths = ? WHERE id = ?''', 
-                         (github_path, record_id))
-            elif table_name == 'feedback':
-                c.execute('''UPDATE feedback SET github_synced = 1 WHERE id = ?''', (record_id,))
-            
-            # 记录同步历史
-            c.execute('''INSERT OR REPLACE INTO github_sync (table_name, record_id, github_path) 
-                        VALUES (?, ?, ?)''', (table_name, record_id, github_path))
-            
-            conn.commit()
-            conn.close()
-            return True, "同步成功"
-        else:
-            return False, github_storage.error_message
-    except Exception as e:
-        return False, f"同步到GitHub失败：{str(e)}"
-
-def sync_file_to_github(file_data, file_name, project_name, author_name):
-    """同步文件到GitHub"""
-    try:
-        if not github_storage.connect():
-            return None
-            
-        timestamp = get_beijing_time().strftime('%Y%m%d_%H%M%S')
-        safe_project_name = "".join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        safe_author_name = "".join(c for c in author_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        
-        github_path = f"uploads/{safe_project_name}_{safe_author_name}/{timestamp}_{file_name}"
-        
-        # 保存到GitHub
-        if github_storage.save_binary_file(file_data, github_path, f"上传文件：{file_name}"):
-            return github_path
-        else:
-            return None
-    except Exception as e:
-        print(f"同步文件到GitHub失败：{str(e)}")
-        return None
-
 def get_feedback_data():
     """从数据库读取意见反馈数据"""
     try:
@@ -799,7 +551,7 @@ def get_feedback_data():
         c = conn.cursor()
         
         c.execute('''
-            SELECT id, feedback_content, submit_time, ip_address, user_agent, github_synced
+            SELECT id, feedback_content, submit_time, ip_address, user_agent
             FROM feedback
             ORDER BY submit_time DESC
         ''')
@@ -811,8 +563,7 @@ def get_feedback_data():
                 "反馈内容": row[1],
                 "提交时间": format_beijing_time(row[2]),
                 "IP地址": row[3] if row[3] else "未知",
-                "用户代理": row[4] if row[4] else "未知",
-                "GitHub同步": "✅" if row[5] else "❌"
+                "用户代理": row[4] if row[4] else "未知"
             })
         
         conn.close()
@@ -822,7 +573,7 @@ def get_feedback_data():
         return []
 
 def save_feedback_to_db(feedback_content):
-    """保存反馈到数据库并同步到GitHub"""
+    """保存反馈到数据库"""
     try:
         import socket
         import streamlit as st
@@ -847,31 +598,15 @@ def save_feedback_to_db(feedback_content):
             VALUES (?, ?, ?)
         ''', (feedback_content, ip_address, user_agent))
         
-        record_id = c.lastrowid
-        
         conn.commit()
         conn.close()
-        
-        # 同步到GitHub
-        feedback_data = {
-            "content": feedback_content,
-            "ip_address": ip_address,
-            "user_agent": user_agent,
-            "submit_time": get_beijing_time().isoformat(),
-            "record_id": record_id
-        }
-        
-        success, message = sync_data_to_github('feedback', record_id, feedback_data)
-        if success:
-            return True, "已保存并同步到GitHub"
-        else:
-            return True, f"已保存到本地（GitHub同步失败：{message}）"
-        
+        return True
     except Exception as e:
-        return False, f"保存失败：{str(e)}"
+        st.error(f"保存反馈失败：{str(e)}")
+        return False
 
 def save_uploaded_files(uploaded_files, project_name, author_name):
-    """保存上传的文件到服务器和GitHub"""
+    """保存上传的文件到服务器"""
     try:
         # 创建上传目录
         upload_dir = "uploads"
@@ -879,43 +614,33 @@ def save_uploaded_files(uploaded_files, project_name, author_name):
             os.makedirs(upload_dir)
         
         # 创建项目目录
-        safe_project_name = "".join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        safe_author_name = "".join(c for c in author_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        project_dir = os.path.join(upload_dir, f"{safe_project_name}_{safe_author_name}")
+        project_dir = os.path.join(upload_dir, f"{project_name}_{author_name}")
         if not os.path.exists(project_dir):
             os.makedirs(project_dir)
         
         saved_files = []
         file_paths = []
-        github_paths = []
         
         for uploaded_file in uploaded_files:
             # 生成唯一文件名
             file_ext = os.path.splitext(uploaded_file.name)[1]
             unique_filename = f"{get_beijing_time().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
-            local_file_path = os.path.join(project_dir, unique_filename)
+            file_path = os.path.join(project_dir, unique_filename)
             
-            # 保存文件到本地
-            with open(local_file_path, "wb") as f:
+            # 保存文件
+            with open(file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
-            # 同步到GitHub
-            github_path = None
-            if github_storage.connect():
-                file_data = uploaded_file.getvalue()
-                github_path = sync_file_to_github(file_data, uploaded_file.name, project_name, author_name)
-            
             saved_files.append(uploaded_file.name)
-            file_paths.append(local_file_path)
-            github_paths.append(github_path if github_path else "")
+            file_paths.append(file_path)
         
-        return saved_files, file_paths, github_paths
+        return saved_files, file_paths
     except Exception as e:
         st.error(f"保存文件失败：{str(e)}")
-        return [], [], []
+        return [], []
 
 def save_submitted_project(project_data, uploaded_files=None):
-    """保存提交的作品到数据库并同步到GitHub"""
+    """保存提交的作品到数据库"""
     try:
         conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
@@ -927,36 +652,19 @@ def save_submitted_project(project_data, uploaded_files=None):
         
         files_str = json.dumps(project_data.get('files', []))
         file_paths_str = json.dumps(project_data.get('file_paths', []))
-        github_paths_str = json.dumps(project_data.get('github_paths', []))
         
         c.execute('''
-            INSERT INTO submitted_projects (project_name, author_name, project_desc, files, file_paths, user_id, github_paths)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO submitted_projects (project_name, author_name, project_desc, files, file_paths, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (project_data['project_name'], project_data['author_name'], 
-              project_data['project_desc'], files_str, file_paths_str, user_id, github_paths_str))
-        
-        record_id = c.lastrowid
+              project_data['project_desc'], files_str, file_paths_str, user_id))
         
         conn.commit()
         conn.close()
-        
-        # 同步完整数据到GitHub
-        project_full_data = {
-            **project_data,
-            "record_id": record_id,
-            "user_id": user_id,
-            "submit_time": get_beijing_time().isoformat(),
-            "status": "待审核"
-        }
-        
-        success, message = sync_data_to_github('submitted_projects', record_id, project_full_data)
-        if success:
-            return True, "已保存并同步到GitHub"
-        else:
-            return True, f"已保存到本地（GitHub同步失败：{message}）"
-        
+        return True
     except Exception as e:
-        return False, f"保存作品失败：{str(e)}"
+        st.error(f"保存作品失败：{str(e)}")
+        return False
 
 def get_submitted_projects(user_id=None):
     """获取所有提交的作品"""
@@ -968,7 +676,7 @@ def get_submitted_projects(user_id=None):
             # 获取特定用户的作品
             c.execute('''
                 SELECT id, project_name, author_name, project_desc, 
-                       submit_time, files, file_paths, status, review_notes, review_time, reviewer, github_paths
+                       submit_time, files, file_paths, status, review_notes, review_time, reviewer
                 FROM submitted_projects
                 WHERE user_id = ?
                 ORDER BY submit_time DESC
@@ -977,7 +685,7 @@ def get_submitted_projects(user_id=None):
             # 获取所有作品
             c.execute('''
                 SELECT id, project_name, author_name, project_desc, 
-                       submit_time, files, file_paths, status, review_notes, review_time, reviewer, github_paths
+                       submit_time, files, file_paths, status, review_notes, review_time, reviewer
                 FROM submitted_projects
                 ORDER BY submit_time DESC
             ''')
@@ -986,7 +694,6 @@ def get_submitted_projects(user_id=None):
         for row in c.fetchall():
             files = json.loads(row[5]) if row[5] else []
             file_paths = json.loads(row[6]) if row[6] else []
-            github_paths = json.loads(row[11]) if row[11] else []
             projects.append({
                 "id": row[0],
                 "project_name": row[1],
@@ -995,7 +702,6 @@ def get_submitted_projects(user_id=None):
                 "submit_time": format_beijing_time(row[4]),
                 "files": files,
                 "file_paths": file_paths,
-                "github_paths": github_paths,
                 "status": row[7],
                 "review_notes": row[8],
                 "review_time": format_beijing_time(row[9]),
@@ -1009,7 +715,7 @@ def get_submitted_projects(user_id=None):
         return []
 
 def update_project_status(project_id, status, review_notes=""):
-    """更新作品审核状态并同步到GitHub"""
+    """更新作品审核状态"""
     try:
         conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
@@ -1020,38 +726,8 @@ def update_project_status(project_id, status, review_notes=""):
             WHERE id = ?
         ''', (status, review_notes, st.session_state.username, project_id))
         
-        # 获取更新后的数据
-        c.execute('SELECT github_paths FROM submitted_projects WHERE id = ?', (project_id,))
-        github_paths = c.fetchone()[0]
-        
         conn.commit()
         conn.close()
-        
-        # 同步更新到GitHub（如果已连接）
-        if github_paths and github_storage.connect():
-            try:
-                github_paths_list = json.loads(github_paths)
-                for github_path in github_paths_list:
-                    if github_path:
-                        # 获取原始数据
-                        data_json = github_storage.get_file_from_github(github_path)
-                        if data_json:
-                            data = json.loads(data_json)
-                            # 更新状态
-                            data["status"] = status
-                            data["review_notes"] = review_notes
-                            data["reviewer"] = st.session_state.username
-                            data["review_time"] = get_beijing_time().isoformat()
-                            
-                            # 保存回GitHub
-                            github_storage.save_file_to_github(
-                                json.dumps(data, ensure_ascii=False, indent=2),
-                                github_path,
-                                f"更新审核状态为{status}"
-                            )
-            except:
-                pass
-        
         return True
     except Exception as e:
         st.error(f"更新作品状态失败：{str(e)}")
@@ -1060,58 +736,29 @@ def update_project_status(project_id, status, review_notes=""):
 def download_project_files(project):
     """下载项目文件 - 增强版本，确保用户可下载自己的文件"""
     try:
-        # 首先尝试从GitHub下载
-        github_files = []
-        if project.get('github_paths') and github_storage.connect():
-            for i, github_path in enumerate(project['github_paths']):
-                if github_path:
-                    file_data = github_storage.get_file_from_github(github_path)
-                    if file_data:
-                        original_filename = project['files'][i] if i < len(project['files']) else f"file_{i+1}"
-                        github_files.append((original_filename, file_data))
+        if not project.get('file_paths'):
+            return None
         
-        # 如果GitHub没有文件，尝试本地文件
-        if not github_files and project.get('file_paths'):
-            # 创建临时目录
-            temp_dir = tempfile.mkdtemp()
-            zip_path = os.path.join(temp_dir, f"{project['project_name']}_files.zip")
-            
-            # 创建ZIP文件
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for i, file_path in enumerate(project['file_paths']):
-                    if os.path.exists(file_path):
-                        original_filename = project['files'][i] if i < len(project['files']) else f"file_{i+1}"
-                        zipf.write(file_path, original_filename)
-            
-            # 读取ZIP文件内容
-            with open(zip_path, 'rb') as f:
-                zip_data = f.read()
-            
-            # 清理临时文件
-            shutil.rmtree(temp_dir)
-            
-            return zip_data
+        # 创建临时目录
+        temp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(temp_dir, f"{project['project_name']}_files.zip")
         
-        # 如果有GitHub文件，创建ZIP
-        if github_files:
-            temp_dir = tempfile.mkdtemp()
-            zip_path = os.path.join(temp_dir, f"{project['project_name']}_files.zip")
-            
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for filename, filedata in github_files:
-                    # 将文件数据写入临时文件
-                    temp_file_path = os.path.join(temp_dir, filename)
-                    with open(temp_file_path, 'wb') as f:
-                        f.write(filedata)
-                    zipf.write(temp_file_path, filename)
-            
-            with open(zip_path, 'rb') as f:
-                zip_data = f.read()
-            
-            shutil.rmtree(temp_dir)
-            return zip_data
+        # 创建ZIP文件
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for i, file_path in enumerate(project['file_paths']):
+                if os.path.exists(file_path):
+                    # 使用原始文件名
+                    original_filename = project['files'][i] if i < len(project['files']) else f"file_{i+1}"
+                    zipf.write(file_path, original_filename)
         
-        return None
+        # 读取ZIP文件内容
+        with open(zip_path, 'rb') as f:
+            zip_data = f.read()
+        
+        # 清理临时文件
+        shutil.rmtree(temp_dir)
+        
+        return zip_data
     except Exception as e:
         st.error(f"下载文件失败：{str(e)}")
         return None
@@ -1174,9 +821,8 @@ def render_my_projects():
                     
                     if project['files']:
                         st.markdown(f"**上传文件：**")
-                        for i, file in enumerate(project['files']):
-                            github_status = "✅" if (project.get('github_paths') and i < len(project['github_paths']) and project['github_paths'][i]) else "❌"
-                            st.markdown(f"- 📎 {file} {github_status}")
+                        for file in project['files']:
+                            st.markdown(f"- 📎 {file}")
                 
                 with col2:
                     # 显示状态
@@ -1206,7 +852,7 @@ def render_my_projects():
                         st.markdown(f"**审核老师：** {project['reviewer']}")
                 
                 # 下载按钮 - 无论状态如何，用户都可以下载自己提交的文件
-                if project['files']:
+                if project['files'] and project.get('file_paths'):
                     zip_data = download_project_files(project)
                     if zip_data:
                         st.download_button(
@@ -1214,7 +860,8 @@ def render_my_projects():
                             data=zip_data,
                             file_name=f"{project['project_name']}_作品文件.zip",
                             mime="application/zip",
-                            key=f"download_{project['id']}"
+                            key=f"download_{project['id']}",
+                            width='content'
                         )
                         st.info("💡 您可以随时下载您提交的文件")
     else:
@@ -1230,7 +877,7 @@ def export_feedback_to_csv(feedback_data):
         output = io.StringIO()
         
         # 定义CSV字段
-        fieldnames = ["序号", "反馈内容", "提交时间", "IP地址", "用户代理", "GitHub同步"]
+        fieldnames = ["序号", "反馈内容", "提交时间", "IP地址", "用户代理"]
         
         # 创建CSV writer，确保正确处理中文
         writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -1259,7 +906,6 @@ def render_admin_dashboard():
     # 页面标题与用户信息
     st.markdown("<h1 style='color:#dc2626; font-size:2rem;'>🔧 管理员后台</h1>", unsafe_allow_html=True)
     st.markdown(f"### 👤 当前登录教师：{st.session_state.username}")
-    
     st.markdown("---")
     
     # 返回普通视图按钮
@@ -1267,36 +913,8 @@ def render_admin_dashboard():
         st.session_state.show_admin = False
         st.rerun()
     
-    # 手动同步按钮
-    if st.button("🔄 手动同步所有数据到GitHub", type="primary"):
-        with st.spinner("正在同步数据到GitHub..."):
-            # 同步所有未同步的反馈
-            conn = sqlite3.connect('image_processing_platform.db')
-            c = conn.cursor()
-            c.execute("SELECT id, feedback_content, submit_time, ip_address, user_agent FROM feedback WHERE github_synced = 0")
-            unsynced_feedback = c.fetchall()
-            
-            synced_count = 0
-            for row in unsynced_feedback:
-                feedback_data = {
-                    "content": row[1],
-                    "submit_time": format_beijing_time(row[2]),
-                    "ip_address": row[3],
-                    "user_agent": row[4],
-                    "record_id": row[0]
-                }
-                success, message = sync_data_to_github('feedback', row[0], feedback_data)
-                if success:
-                    synced_count += 1
-            
-            if synced_count > 0:
-                st.success(f"✅ 已同步 {synced_count} 条反馈数据到GitHub")
-            else:
-                st.info("没有需要同步的反馈数据")
-            conn.close()
-    
     # 标签页布局
-    admin_tabs = st.tabs(["📝 作品审核", "💬 意见反馈", "📊 平台统计", "🔄 数据同步"])
+    admin_tabs = st.tabs(["📝 作品审核", "💬 意见反馈", "📊 平台统计"])
     
     # 1. 作品审核标签页
     with admin_tabs[0]:
@@ -1354,20 +972,21 @@ def render_admin_dashboard():
                         
                         if project['files']:
                             st.markdown(f"**上传文件：**")
-                            for i, file in enumerate(project['files']):
-                                github_status = "✅" if (project.get('github_paths') and i < len(project['github_paths']) and project['github_paths'][i]) else "❌"
-                                st.markdown(f"- 📎 {file} {github_status}")
+                            for file in project['files']:
+                                st.markdown(f"- 📎 {file}")
                             
                             # 管理员下载按钮
-                            zip_data = download_project_files(project)
-                            if zip_data:
-                                st.download_button(
-                                    label="📥 下载作品文件",
-                                    data=zip_data,
-                                    file_name=f"{project['project_name']}_作品文件.zip",
-                                    mime="application/zip",
-                                    key=f"admin_download_{project['id']}"
-                                )
+                            if project.get('file_paths'):
+                                zip_data = download_project_files(project)
+                                if zip_data:
+                                    st.download_button(
+                                        label="📥 下载作品文件",
+                                        data=zip_data,
+                                        file_name=f"{project['project_name']}_作品文件.zip",
+                                        mime="application/zip",
+                                        key=f"admin_download_{project['id']}",
+                                        width='content'
+                                    )
                     
                     with col2:
                         # 显示状态标签
@@ -1393,12 +1012,12 @@ def render_admin_dashboard():
                             review_notes = st.text_area(f"审核意见（可选）", key=f"notes_{project['id']}")
                         
                         with col2:
-                            if st.button("✅ 通过审核", key=f"approve_{project['id']}"):
+                            if st.button("✅ 通过审核", key=f"approve_{project['id']}", width='content'):
                                 if update_project_status(project['id'], "已通过", review_notes):
                                     st.success("作品已通过审核！")
                                     st.rerun()
                             
-                            if st.button("❌ 拒绝作品", key=f"reject_{project['id']}"):
+                            if st.button("❌ 拒绝作品", key=f"reject_{project['id']}", width='content'):
                                 if update_project_status(project['id'], "已拒绝", review_notes):
                                     st.success("作品已拒绝！")
                                     st.rerun()
@@ -1422,8 +1041,7 @@ def render_admin_dashboard():
                     "提交时间": st.column_config.DatetimeColumn("提交时间", width="medium", format="YYYY-MM-DD HH:mm:ss"),
                     "反馈内容": st.column_config.TextColumn("反馈内容", width="large"),
                     "IP地址": st.column_config.TextColumn("IP地址", width="medium"),
-                    "用户代理": st.column_config.TextColumn("用户代理", width="large"),
-                    "GitHub同步": st.column_config.TextColumn("GitHub同步", width="small")
+                    "用户代理": st.column_config.TextColumn("用户代理", width="large")
                 }
             )
 
@@ -1434,26 +1052,24 @@ def render_admin_dashboard():
                     label="📥 导出反馈数据（CSV-GB18030编码）",
                     data=csv_bytes,
                     file_name=f"意见反馈_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    width='content'
                 )
             
             # 显示反馈统计
             st.divider()
             st.markdown("#### 📊 反馈统计")
             total_feedback = len(feedback_data)
-            synced_feedback = len([f for f in feedback_data if f["GitHub同步"] == "✅"])
             if total_feedback > 0:
                 avg_length = sum(len(f["反馈内容"]) for f in feedback_data) / total_feedback
                 latest_feedback = feedback_data[0]["提交时间"] if feedback_data else "暂无"
                 
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("总反馈数量", total_feedback)
                 with col2:
-                    st.metric("已同步GitHub", synced_feedback)
-                with col3:
                     st.metric("平均字数", f"{avg_length:.0f}字")
-                with col4:
+                with col3:
                     st.metric("最新反馈", latest_feedback[:10])
         else:
             st.info("📭 暂无用户提交的意见反馈")
@@ -1566,113 +1182,27 @@ def render_admin_dashboard():
                 
         except Exception as e:
             st.error(f"统计数据加载失败：{str(e)}")
-    
-    # 4. 数据同步标签页
-    with admin_tabs[3]:
-        st.markdown("<h2 style='color:#dc2626;'>🔄 数据同步管理</h2>", unsafe_allow_html=True)
-        
-        # GitHub连接状态
-        if github_storage.connect():
-            st.success("✅ GitHub仓库连接成功")
-            
-            # 显示仓库信息
-            try:
-                repo_info = github_storage.repo
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("仓库名称", repo_info.name)
-                with col2:
-                    files = github_storage.list_files()
-                    st.metric("文件数量", len(files) if files else 0)
-                with col3:
-                    st.metric("最后更新", repo_info.updated_at.strftime('%Y-%m-%d'))
-                
-                # 显示最近的同步记录
-                conn = sqlite3.connect('image_processing_platform.db')
-                c = conn.cursor()
-                c.execute('''
-                    SELECT table_name, COUNT(*) as count, MAX(synced_at) as last_sync
-                    FROM github_sync 
-                    GROUP BY table_name
-                    ORDER BY last_sync DESC
-                ''')
-                sync_stats = c.fetchall()
-                
-                if sync_stats:
-                    st.markdown("#### 📊 同步统计")
-                    for table_name, count, last_sync in sync_stats:
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric(f"{table_name}记录数", count)
-                        with col2:
-                            st.metric("最后同步", format_beijing_time(last_sync))
-                        with col3:
-                            # 重新同步按钮
-                            if st.button(f"🔄 重新同步{table_name}", key=f"resync_{table_name}"):
-                                with st.spinner(f"正在同步{table_name}..."):
-                                    if table_name == 'feedback':
-                                        c.execute("SELECT id FROM feedback")
-                                        feedback_ids = c.fetchall()
-                                        for (fid,) in feedback_ids:
-                                            c.execute("SELECT feedback_content, submit_time, ip_address, user_agent FROM feedback WHERE id = ?", (fid,))
-                                            row = c.fetchone()
-                                            if row:
-                                                feedback_data = {
-                                                    "content": row[0],
-                                                    "submit_time": format_beijing_time(row[1]),
-                                                    "ip_address": row[2],
-                                                    "user_agent": row[3],
-                                                    "record_id": fid
-                                                }
-                                                sync_data_to_github('feedback', fid, feedback_data)
-                                    elif table_name == 'submitted_projects':
-                                        c.execute("SELECT id FROM submitted_projects")
-                                        project_ids = c.fetchall()
-                                        for (pid,) in project_ids:
-                                            c.execute("SELECT project_name, author_name, project_desc, submit_time, status FROM submitted_projects WHERE id = ?", (pid,))
-                                            row = c.fetchone()
-                                            if row:
-                                                project_data = {
-                                                    "project_name": row[0],
-                                                    "author_name": row[1],
-                                                    "project_desc": row[2],
-                                                    "submit_time": format_beijing_time(row[3]),
-                                                    "status": row[4],
-                                                    "record_id": pid
-                                                }
-                                                sync_data_to_github('submitted_projects', pid, project_data)
-                                    st.success(f"✅ {table_name}数据重新同步完成")
-                                    st.rerun()
-                conn.close()
-                
-            except Exception as e:
-                st.error(f"获取仓库信息失败：{str(e)}")
-        else:
-            st.warning("⚠️ GitHub仓库未连接")
-            st.info("""
-            **本地运行模式：**
-            - 数据仅保存到本地数据库
-            - 部署到Streamlit Cloud时可配置GitHub同步
-            
-            **Streamlit Cloud配置说明：**
-            1. 在Secrets中设置GITHUB_TOKEN
-            2. 确保GitHub仓库存在且有写入权限
-            3. 配置文件格式：
-            ```
-            # .streamlit/secrets.toml
-            GITHUB_TOKEN = "your_github_personal_access_token"
-            ```
-            """)
 
 def render_main_content():
     """渲染主要的成果展示内容"""
     # 页面标题
     st.markdown("""
     <div class='modern-header'>
-        <h1 >🏆 思政成果展示</h1>
+        <h1 class='main-title'>🏆 思政成果展示</h1>
         <p style='font-size: 1.2rem; color: rgba(255,255,255,0.9);'>技术赋能 · 思想引领 · 创新驱动 · 服务国家</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # 总体统计
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("🎯 优秀作品", "3个", "+1个")
+    with col2:
+        st.metric("🏅 获得奖项", "120项", "+1项")
+    with col3:
+        st.metric("💡 技术创新", "8项", "+42项")
+    with col4:
+        st.metric("🌟 思政融合", "98%", "深度融合")
     
     # 使用标签页组织内容
     tab1, tab2, tab3, tab4 = st.tabs(["🎨 优秀作品", "📊 成果分析", "💡 作品征集", "💬 意见反馈"])
@@ -1818,16 +1348,10 @@ def render_main_content():
         欢迎提交您的思政与技术融合作品，优秀作品将纳入展示平台。
         作品要求体现技术创新的同时，融入思政元素，展现新时代大学生的责任与担当。
         
-        💾 **数据保存说明：**
-        - 本地运行：数据保存到本地数据库
-        - 云端部署：数据同时保存到本地和GitHub仓库
-        - 所有提交的文件都会永久保存
-        
         📋 **提交后您可以：**
         1. 在侧边栏点击【我的提交记录】查看审核状态
         2. 无论审核状态如何，您都可以下载自己提交的文件
         3. 查看老师的审核意见
-        4. 数据永久保存，随时可访问
         """)
         
         with st.form("project_submit_form"):
@@ -1845,47 +1369,41 @@ def render_main_content():
                 "📎 上传相关文件（代码/文档/PPT/图片/视频等）",
                 accept_multiple_files=True,
                 type=["zip", "rar", "pdf", "doc", "docx", "pptx", "jpg", "jpeg", "png", "gif", "mp4", "avi", "mov"],
-                help="支持多种格式文件，建议单个文件不超过20MB。文件将保存到本地数据库。"
+                help="支持多种格式文件，建议单个文件不超过20MB"
             )
             
-            submitted = st.form_submit_button("🚀 提交作品", type="primary")
+            submitted = st.form_submit_button("🚀 提交作品", type="primary", width='content')
             
             if submitted:
                 if project_name and author_name and project_desc:
-                    with st.spinner("正在保存作品..."):
-                        # 保存上传的文件
-                        saved_files = []
-                        file_paths = []
-                        github_paths = []
-                        if uploaded_files:
-                            saved_files, file_paths, github_paths = save_uploaded_files(uploaded_files, project_name, author_name)
-                        
-                        # 构建作品数据
-                        project_data = {
-                            "project_name": project_name,
-                            "author_name": author_name,
-                            "project_desc": project_desc,
-                            "files": saved_files,
-                            "file_paths": file_paths,
-                            "github_paths": github_paths
-                        }
-                        
-                        # 保存到数据库和GitHub
-                        success, message = save_submitted_project(project_data, uploaded_files)
-                        
-                        if success:
-                            if saved_files:
-                                st.success(f"✅ 作品提交成功！{message}")
-                                st.markdown("**已上传文件：**")
-                                for file in saved_files:
-                                    st.markdown(f"- 📎 {file}")
-                            else:
-                                st.success(f"✅ 作品提交成功！{message}")
-                            
-                            st.info("💡 您可以在侧边栏点击【我的提交记录】查看审核状态和下载您提交的文件")
-                            st.balloons()
+                    # 保存上传的文件
+                    saved_files = []
+                    file_paths = []
+                    if uploaded_files:
+                        saved_files, file_paths = save_uploaded_files(uploaded_files, project_name, author_name)
+                    
+                    # 构建作品数据
+                    project_data = {
+                        "project_name": project_name,
+                        "author_name": author_name,
+                        "project_desc": project_desc,
+                        "files": saved_files,
+                        "file_paths": file_paths
+                    }
+                    
+                    # 保存到数据库
+                    if save_submitted_project(project_data, uploaded_files):
+                        if saved_files:
+                            st.success(f"✅ 作品提交成功！已上传 {len(saved_files)} 个文件")
+                            for file in saved_files:
+                                st.markdown(f"- 📎 {file}")
                         else:
-                            st.error(f"❌ 作品提交失败：{message}")
+                            st.success("✅ 作品提交成功！我们将尽快审核~")
+                        
+                        st.info("💡 您可以在侧边栏点击【我的提交记录】查看审核状态和下载您提交的文件")
+                        st.balloons()
+                    else:
+                        st.error("❌ 作品提交失败，请稍后重试")
                 else:
                     st.error("⚠️ 请填写作品名称、作者和描述等必填信息")
     
@@ -1897,11 +1415,6 @@ def render_main_content():
         📝 **反馈说明：**
         请留下您对本平台的建议或想法，帮助我们不断改进。
         您的反馈对我们非常重要！（本功能不收集个人敏感信息）
-        
-        💾 **数据保存说明：**
-        - 本地运行：数据保存到本地数据库
-        - 云端部署：数据同时保存到本地和GitHub仓库
-        - 所有反馈都会永久保存
         """)
         
         feedback_content = st.text_area(
@@ -1912,19 +1425,17 @@ def render_main_content():
         
         col1, col2 = st.columns([3, 1])
         with col1:
-            if st.button("📤 提交反馈", type="primary"):
+            if st.button("📤 提交反馈", type="primary", width='content'):
                 if feedback_content.strip():
-                    with st.spinner("正在保存反馈..."):
-                        success, message = save_feedback_to_db(feedback_content)
-                        if success:
-                            st.success(f"✅ 感谢您的反馈！{message}")
-                            st.balloons()
-                        else:
-                            st.error(f"❌ 提交失败：{message}")
+                    if save_feedback_to_db(feedback_content):
+                        st.success("✅ 感谢您的反馈！我们会认真参考~")
+                        st.balloons()
+                    else:
+                        st.error("❌ 提交失败，请稍后重试")
                 else:
                     st.warning("⚠️ 请输入反馈内容后再提交哦~")
         with col2:
-            if st.button("🔄 清空内容"):
+            if st.button("🔄 清空内容", width='content'):
                 st.rerun()
 
 def main():

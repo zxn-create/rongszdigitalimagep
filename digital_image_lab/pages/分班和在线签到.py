@@ -12,12 +12,6 @@ import hashlib
 import uuid
 import plotly.graph_objects as go
 import plotly.express as px
-import os
-import json
-import base64
-from github import Github
-from github import Auth
-import io
 
 # 页面配置
 st.set_page_config(
@@ -26,230 +20,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# GitHub配置
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-GITHUB_REPO = "zxn-create/rongszdigitalimagep"
-DATA_BRANCH = "main"
-DB_FILENAME = "classroom_data.db"
-
-# 初始化GitHub连接
-def get_github_connection():
-    """获取GitHub连接"""
-    if GITHUB_TOKEN:
-        try:
-            auth = Auth.Token(GITHUB_TOKEN)
-            g = Github(auth=auth)
-            repo = g.get_repo(GITHUB_REPO)
-            return repo
-        except Exception as e:
-            st.error(f"GitHub连接失败: {str(e)}")
-            return None
-    return None
-
-# 从GitHub下载数据库
-def download_db_from_github():
-    """从GitHub下载数据库文件"""
-    try:
-        repo = get_github_connection()
-        if repo:
-            try:
-                contents = repo.get_contents(DB_FILENAME, ref=DATA_BRANCH)
-                db_content = base64.b64decode(contents.content)
-                
-                # 保存到本地临时文件
-                with open(DB_FILENAME, 'wb') as f:
-                    f.write(db_content)
-                
-                return True
-            except:
-                # 文件不存在，创建新数据库
-                init_new_db()
-                return True
-    except Exception as e:
-        st.error(f"下载数据库失败: {str(e)}")
-    
-    # 如果GitHub不可用，使用本地数据库
-    if not os.path.exists(DB_FILENAME):
-        init_new_db()
-    return True
-
-# 上传数据库到GitHub
-def upload_db_to_github():
-    """上传数据库文件到GitHub"""
-    if not GITHUB_TOKEN:
-        return True  # 如果没有token，只使用本地数据库
-    
-    try:
-        repo = get_github_connection()
-        if repo:
-            with open(DB_FILENAME, 'rb') as f:
-                db_content = f.read()
-            
-            try:
-                # 尝试获取现有文件
-                contents = repo.get_contents(DB_FILENAME, ref=DATA_BRANCH)
-                # 更新文件
-                repo.update_file(
-                    path=DB_FILENAME,
-                    message=f"Update database - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    content=db_content,
-                    sha=contents.sha,
-                    branch=DATA_BRANCH
-                )
-            except:
-                # 文件不存在，创建新文件
-                repo.create_file(
-                    path=DB_FILENAME,
-                    message=f"Create database - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    content=db_content,
-                    branch=DATA_BRANCH
-                )
-            
-            return True
-    except Exception as e:
-        st.error(f"上传数据库失败: {str(e)}")
-        return False
-    
-    return True
-
-# 初始化新数据库
-def init_new_db():
-    """创建新的数据库文件"""
-    conn = sqlite3.connect(DB_FILENAME)
-    c = conn.cursor()
-    
-    # 创建班级表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS classrooms (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            class_code VARCHAR(12) UNIQUE NOT NULL,
-            class_name VARCHAR(100) NOT NULL,
-            teacher_username VARCHAR(50) NOT NULL,
-            description TEXT,
-            max_students INTEGER DEFAULT 50,
-            created_at TEXT NOT NULL,
-            is_active BOOLEAN DEFAULT TRUE,
-            subscription_tier VARCHAR(20) DEFAULT 'free',
-            FOREIGN KEY (teacher_username) REFERENCES users (username)
-        )
-    ''')
-    
-    # 创建班级成员表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS classroom_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            class_code VARCHAR(12) NOT NULL,
-            student_username VARCHAR(50) NOT NULL,
-            joined_at TEXT NOT NULL,
-            status VARCHAR(20) DEFAULT 'active',
-            role VARCHAR(20) DEFAULT 'student',
-            UNIQUE(class_code, student_username),
-            FOREIGN KEY (class_code) REFERENCES classrooms (class_code),
-            FOREIGN KEY (student_username) REFERENCES users (username)
-        )
-    ''')
-    
-    # 创建签到活动表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS attendance_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_code VARCHAR(10) UNIQUE NOT NULL,
-            class_code VARCHAR(12) NOT NULL,
-            session_name VARCHAR(100) NOT NULL,
-            teacher_username VARCHAR(50) NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            duration_minutes INTEGER DEFAULT 10,
-            location_lat REAL,
-            location_lng REAL,
-            location_name VARCHAR(100),
-            qr_code_data TEXT,
-            attendance_type VARCHAR(20) DEFAULT 'standard',
-            status VARCHAR(20) DEFAULT 'scheduled',
-            created_at TEXT NOT NULL,
-            total_students INTEGER DEFAULT 0,
-            attended_students INTEGER DEFAULT 0,
-            FOREIGN KEY (class_code) REFERENCES classrooms (class_code),
-            FOREIGN KEY (teacher_username) REFERENCES users (username)
-        )
-    ''')
-    
-    # 创建签到记录表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS attendance_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_code VARCHAR(10) NOT NULL,
-            student_username VARCHAR(50) NOT NULL,
-            class_code VARCHAR(12) NOT NULL,
-            check_in_time TEXT NOT NULL,
-            check_in_method VARCHAR(20) DEFAULT 'manual',
-            device_info TEXT,
-            ip_address VARCHAR(45),
-            location_lat REAL,
-            location_lng REAL,
-            is_late BOOLEAN DEFAULT FALSE,
-            points_earned INTEGER DEFAULT 10,
-            status VARCHAR(20) DEFAULT 'present',
-            UNIQUE(session_code, student_username),
-            FOREIGN KEY (session_code) REFERENCES attendance_sessions (session_code),
-            FOREIGN KEY (student_username) REFERENCES users (username)
-        )
-    ''')
-    
-    # 创建订阅套餐表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS subscription_plans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            plan_code VARCHAR(20) UNIQUE NOT NULL,
-            plan_name VARCHAR(50) NOT NULL,
-            price_monthly REAL DEFAULT 0,
-            price_yearly REAL DEFAULT 0,
-            max_classes INTEGER DEFAULT 1,
-            max_students_per_class INTEGER DEFAULT 30,
-            max_attendance_sessions INTEGER DEFAULT 20,
-            features TEXT,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TEXT NOT NULL
-        )
-    ''')
-    
-    # 创建教师订阅表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS teacher_subscriptions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            teacher_username VARCHAR(50) NOT NULL,
-            plan_code VARCHAR(20) NOT NULL,
-            start_date TEXT NOT NULL,
-            end_date TEXT NOT NULL,
-            payment_status VARCHAR(20) DEFAULT 'active',
-            auto_renew BOOLEAN DEFAULT TRUE,
-            FOREIGN KEY (teacher_username) REFERENCES users (username),
-            FOREIGN KEY (plan_code) REFERENCES subscription_plans (plan_code)
-        )
-    ''')
-    
-    # 创建通知表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS class_notifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            class_code VARCHAR(12) NOT NULL,
-            title VARCHAR(200) NOT NULL,
-            content TEXT NOT NULL,
-            notification_type VARCHAR(20) DEFAULT 'announcement',
-            created_by VARCHAR(50) NOT NULL,
-            created_at TEXT NOT NULL,
-            is_urgent BOOLEAN DEFAULT FALSE,
-            FOREIGN KEY (class_code) REFERENCES classrooms (class_code),
-            FOREIGN KEY (created_by) REFERENCES users (username)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    
-    # 初始化默认订阅套餐
-    init_default_plans()
 
 # 获取北京时间（中国时区）
 def get_beijing_time():
@@ -270,10 +40,7 @@ def from_beijing_time_str(time_str):
 # 初始化数据库表（用于班级和签到）
 def init_classroom_db():
     """初始化班级管理和签到相关数据库表"""
-    # 下载数据库文件
-    download_db_from_github()
-    
-    conn = sqlite3.connect(DB_FILENAME)
+    conn = sqlite3.connect('image_processing_platform.db')
     c = conn.cursor()
     
     # 创建班级表
@@ -443,7 +210,7 @@ def init_default_plans():
         }
     ]
     
-    conn = sqlite3.connect(DB_FILENAME)
+    conn = sqlite3.connect('image_processing_platform.db')
     c = conn.cursor()
     
     for plan in default_plans:
@@ -466,12 +233,10 @@ def init_default_plans():
     
     conn.commit()
     conn.close()
-    upload_db_to_github()
-
 def delete_classroom_simple(class_code, teacher_username):
     """简单删除班级 - 软删除（标记为不活跃）"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 简单验证：检查班级是否存在且教师匹配
@@ -498,18 +263,13 @@ def delete_classroom_simple(class_code, teacher_username):
         
         conn.commit()
         conn.close()
-        
-        # 同步到GitHub
-        upload_db_to_github()
-        
         return True, "班级已成功删除"
     except Exception as e:
         return False, f"删除失败: {str(e)}"
-
 def get_classroom_stats(class_code):
     """获取班级统计信息"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 获取班级基本信息
@@ -545,7 +305,6 @@ def get_classroom_stats(class_code):
     except Exception as e:
         print(f"获取班级统计失败: {str(e)}")
         return None
-
 # 生成唯一代码
 def generate_unique_code(prefix="", length=8):
     """生成唯一的班级代码或签到代码"""
@@ -553,11 +312,11 @@ def generate_unique_code(prefix="", length=8):
     random_str = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()[:length-4]
     return f"{prefix}{timestamp}{random_str}".upper()
 
-# 数据库操作函数（修改为使用同步数据库）
+# 数据库操作函数
 def create_classroom(teacher_username, class_name, description="", max_students=50):
     """创建新班级"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 检查教师是否有可用的班级名额
@@ -585,7 +344,6 @@ def create_classroom(teacher_username, class_name, description="", max_students=
             max_allowed_classes = 10000000000
         
         if current_classes >= max_allowed_classes:
-            conn.close()
             return False, f"已达到班级数量上限({max_allowed_classes}个)，请升级套餐"
         
         # 生成班级代码
@@ -608,10 +366,6 @@ def create_classroom(teacher_username, class_name, description="", max_students=
         
         conn.commit()
         conn.close()
-        
-        # 同步到GitHub
-        upload_db_to_github()
-        
         return True, class_code
     except Exception as e:
         return False, f"创建班级失败: {str(e)}"
@@ -619,7 +373,7 @@ def create_classroom(teacher_username, class_name, description="", max_students=
 def join_classroom(student_username, class_code):
     """学生加入班级"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 检查班级是否存在且活跃
@@ -631,11 +385,9 @@ def join_classroom(student_username, class_code):
         
         class_info = c.fetchone()
         if not class_info:
-            conn.close()
             return False, "班级不存在"
         
         if not class_info[2]:
-            conn.close()
             return False, "班级已关闭"
         
         # 检查班级是否已满
@@ -648,7 +400,6 @@ def join_classroom(student_username, class_code):
         max_students = class_info[1]
         
         if current_students >= max_students:
-            conn.close()
             return False, "班级人数已满"
         
         # 检查是否已经加入
@@ -658,7 +409,6 @@ def join_classroom(student_username, class_code):
         """, (class_code, student_username))
         
         if c.fetchone():
-            conn.close()
             return False, "您已加入该班级"
         
         # 加入班级
@@ -671,10 +421,6 @@ def join_classroom(student_username, class_code):
         
         conn.commit()
         conn.close()
-        
-        # 同步到GitHub
-        upload_db_to_github()
-        
         return True, "成功加入班级"
     except Exception as e:
         return False, f"加入班级失败: {str(e)}"
@@ -684,7 +430,7 @@ def create_attendance_session(class_code, teacher_username, session_name,
                              location_name=None, attendance_type='standard'):
     """创建签到活动"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 生成签到代码
@@ -712,10 +458,6 @@ def create_attendance_session(class_code, teacher_username, session_name,
         
         conn.commit()
         conn.close()
-        
-        # 同步到GitHub
-        upload_db_to_github()
-        
         return True, session_code
     except Exception as e:
         return False, f"创建签到失败: {str(e)}"
@@ -724,7 +466,7 @@ def check_in_attendance(session_code, student_username, check_in_method='manual'
                        device_info=None, ip_address=None):
     """学生签到 - 修改：放宽签到条件"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 检查签到活动是否存在
@@ -737,6 +479,10 @@ def check_in_attendance(session_code, student_username, check_in_method='manual'
         session_info = c.fetchone()
         if not session_info:
             return False, "签到活动不存在"
+        
+        # 修改：放宽签到条件，允许非active状态也签到
+        # if session_info[3] != 'active':
+        #     return False, "签到活动未激活"
         
         class_code = session_info[0]
         start_time = from_beijing_time_str(session_info[1])
@@ -793,10 +539,6 @@ def check_in_attendance(session_code, student_username, check_in_method='manual'
         
         conn.commit()
         conn.close()
-        
-        # 同步到GitHub
-        upload_db_to_github()
-        
         return True, "签到成功"
     except Exception as e:
         return False, f"签到失败: {str(e)}"
@@ -804,7 +546,7 @@ def check_in_attendance(session_code, student_username, check_in_method='manual'
 def get_teacher_classes(teacher_username):
     """获取教师创建的所有班级"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         c.execute("""
@@ -835,7 +577,7 @@ def get_teacher_classes(teacher_username):
 def get_student_classes(student_username):
     """获取学生加入的所有班级"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         c.execute("""
@@ -867,7 +609,7 @@ def get_student_classes(student_username):
 def get_class_attendance_sessions(class_code):
     """获取班级的所有签到活动"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         c.execute("""
@@ -895,7 +637,7 @@ def get_class_attendance_sessions(class_code):
 def get_attendance_details(session_code):
     """获取签到活动的详细信息"""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 获取签到活动基本信息
@@ -1749,7 +1491,6 @@ section[data-testid="stSidebar"] {
 }
 </style>
 """, unsafe_allow_html=True)
-
 def render_sidebar():
     """渲染侧边栏"""
     with st.sidebar:
@@ -1765,31 +1506,31 @@ def render_sidebar():
         # 快速导航
         st.markdown("### 🧭 快速导航")
         
-        if st.button("🏠 返回首页", use_container_width=True):
+        if st.button("🏠 返回首页", width='stretch'):
             st.switch_page("main.py")
         
         if st.session_state.logged_in:
             role = st.session_state.role
             
             if role == "teacher":
-                if st.button("📊 教师控制台", use_container_width=True):
+                if st.button("📊 教师控制台", width='stretch'):
                     st.session_state.current_page = "teacher_dashboard"
                     st.rerun()
-                if st.button("➕ 创建班级", use_container_width=True):
+                if st.button("➕ 创建班级", width='stretch'):
                     st.session_state.current_page = "create_classroom"
                     st.rerun()
-                if st.button("📝 创建签到", use_container_width=True):
+                if st.button("📝 创建签到", width='stretch'):
                     st.session_state.current_page = "create_attendance"
                     st.rerun()
             
             elif role == "student":
-                if st.button("🎯 我的班级", use_container_width=True):
+                if st.button("🎯 我的班级", width='stretch'):
                     st.session_state.current_page = "student_classes"
                     st.rerun()
-                if st.button("📱 在线签到", use_container_width=True):
+                if st.button("📱 在线签到", width='stretch'):
                     st.session_state.current_page = "attendance_checkin"
                     st.rerun()
-                if st.button("🔍 查找班级", use_container_width=True):
+                if st.button("🔍 查找班级", width='stretch'):
                     st.session_state.current_page = "find_classroom"
                     st.rerun()
         
@@ -1811,7 +1552,7 @@ def render_sidebar():
         # 签到状态
         if st.session_state.logged_in:
             try:
-                conn = sqlite3.connect(DB_FILENAME)
+                conn = sqlite3.connect('image_processing_platform.db')
                 c = conn.cursor()
                 
                 username = st.session_state.username
@@ -1868,7 +1609,6 @@ def render_sidebar():
         st.text(f"北京时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M')}")
         st.text("状态: 🟢 运行中")
         st.text("版本: v1.0.0")
-        st.text(f"数据存储: {'GitHub同步' if GITHUB_TOKEN else '本地存储'}")
 
 def render_teacher_dashboard():
     """教师控制台"""
@@ -1881,9 +1621,12 @@ def render_teacher_dashboard():
     
     username = st.session_state.username
 
-    # ============ 获取真实的统计数据 ============
+
+
+
+    # ============ 修改这里：获取真实的统计数据 ============
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 1. 获取班级数量
@@ -1914,6 +1657,7 @@ def render_teacher_dashboard():
         total_sessions = c.fetchone()[0] or 0
         
         # 4. 获取平均到课率
+
         c.execute("""
             SELECT 
                 session_code,
@@ -1954,7 +1698,7 @@ def render_teacher_dashboard():
         total_sessions = 0
         avg_attendance_rate = 0    
     # 统计卡片
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3= st.columns(3)
     
     # 使用f-string或format方法
     with col1:
@@ -2033,12 +1777,12 @@ def render_teacher_dashboard():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("➕ 创建新班级", use_container_width=True):
+            if st.button("➕ 创建新班级", width='stretch'):
                 st.session_state.current_page = "create_classroom"
                 st.rerun()
         
         with col2:
-            if st.button("📝 创建签到", use_container_width=True):
+            if st.button("📝 创建签到", width='stretch'):
                 st.session_state.current_page = "create_attendance"
                 st.rerun()
         
@@ -2048,10 +1792,9 @@ def render_teacher_dashboard():
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("➕ 创建我的第一个班级", use_container_width=True, type="primary"):
+            if st.button("➕ 创建我的第一个班级", width='stretch', type="primary"):
                 st.session_state.current_page = "create_classroom"
                 st.rerun()
-
 def update_classroom_info(class_code, teacher_username, class_name=None, description=None, max_students=None):
     """
     更新班级信息
@@ -2067,7 +1810,7 @@ def update_classroom_info(class_code, teacher_username, class_name=None, descrip
         (success, message): 成功标志和信息
     """
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 验证教师权限
@@ -2133,9 +1876,6 @@ def update_classroom_info(class_code, teacher_username, class_name=None, descrip
         conn.commit()
         conn.close()
         
-        # 同步到GitHub
-        upload_db_to_github()
-        
         # 记录修改日志
         changes = []
         if class_name:
@@ -2154,7 +1894,6 @@ def update_classroom_info(class_code, teacher_username, class_name=None, descrip
         return False, f"数据库错误: {str(e)}"
     except Exception as e:
         return False, f"更新班级信息失败: {str(e)}"
-
 def render_create_classroom():
     """创建班级页面"""
     st.markdown("""
@@ -2187,10 +1926,10 @@ def render_create_classroom():
     col_btn1, col_btn2 = st.columns(2)
     
     with col_btn1:
-        create_btn = st.button("🚀 创建班级", use_container_width=True, type="primary")
+        create_btn = st.button("🚀 创建班级", width='stretch', type="primary")
     
     with col_btn2:
-        cancel_btn = st.button("❌ 取消", use_container_width=True)
+        cancel_btn = st.button("❌ 取消", width='stretch')
     
     if cancel_btn:
         st.session_state.current_page = "teacher_dashboard"
@@ -2213,13 +1952,13 @@ def render_create_classroom():
                     # 显示操作选项（不使用表单结构）
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("🏫 前往班级管理", use_container_width=True, key="go_to_manage"):
+                        if st.button("🏫 前往班级管理", width='stretch', key="go_to_manage"):
                             st.session_state.selected_class = result
                             st.session_state.current_page = "class_management"
                             st.rerun()
                     
                     with col2:
-                        if st.button("📝 立即创建签到", use_container_width=True, key="go_to_create_attendance"):
+                        if st.button("📝 立即创建签到", width='stretch', key="go_to_create_attendance"):
                             st.session_state.selected_class = result
                             st.session_state.current_page = "create_attendance"
                             st.rerun()
@@ -2227,7 +1966,6 @@ def render_create_classroom():
                     st.error(f"❌ {result}")
         else:
             st.warning("⚠️ 请输入班级名称")
-
 def delete_classroom_enhanced(class_code, teacher_username, delete_type="soft"):
     """
     删除班级（增强版）
@@ -2240,7 +1978,7 @@ def delete_classroom_enhanced(class_code, teacher_username, delete_type="soft"):
             - 'hard': 硬删除（删除所有相关数据）
     """
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 验证教师权限
@@ -2267,6 +2005,13 @@ def delete_classroom_enhanced(class_code, teacher_username, delete_type="soft"):
                 SET is_active = FALSE 
                 WHERE class_code = ?
             """, (class_code,))
+            
+            # 可选：更新成员状态
+            # c.execute("""
+            #     UPDATE classroom_members 
+            #     SET status = 'deleted' 
+            #     WHERE class_code = ?
+            # """, (class_code,))
             
             message = f"班级 '{class_name}' 已标记为删除（不活跃状态）"
             
@@ -2311,10 +2056,7 @@ def delete_classroom_enhanced(class_code, teacher_username, delete_type="soft"):
         conn.commit()
         conn.close()
         
-        # 同步到GitHub
-        upload_db_to_github()
-        
-        # 记录删除日志
+        # 记录删除日志（在实际应用中，可以记录到日志文件或数据库）
         log_entry = f"{to_beijing_time_str()} - 教师 {teacher_username} 删除了班级 {class_code} ({class_name}) - 类型: {delete_type}"
         print(log_entry)
         
@@ -2324,7 +2066,6 @@ def delete_classroom_enhanced(class_code, teacher_username, delete_type="soft"):
         return False, f"数据库完整性错误: {str(e)}"
     except Exception as e:
         return False, f"删除班级失败: {str(e)}"
-
 def render_class_management():
     """班级管理页面 - 修改：允许学生查看班级详情"""
     if 'selected_class' not in st.session_state:
@@ -2334,7 +2075,7 @@ def render_class_management():
     class_code = st.session_state.selected_class
     
     # 获取班级信息
-    conn = sqlite3.connect(DB_FILENAME)
+    conn = sqlite3.connect('image_processing_platform.db')
     c = conn.cursor()
     
     c.execute("""
@@ -2415,7 +2156,7 @@ def render_class_management():
                 })
             
             df_members = pd.DataFrame(members_data)
-            st.dataframe(df_members, use_container_width=True, hide_index=True)
+            st.dataframe(df_members, width='stretch', hide_index=True)
             
             # 只有教师可以导出成员名单
             if is_teacher:
@@ -2425,7 +2166,7 @@ def render_class_management():
                     data=csv,
                     file_name=f"{class_code}_members.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width='stretch'
                 )
         else:
             st.info("暂无班级成员")
@@ -2441,7 +2182,7 @@ def render_class_management():
                 new_member = st.text_input("输入用户名添加成员", placeholder="请输入学生用户名", key="new_member_input")
             
             with col2:
-                if st.button("添加", use_container_width=True, key="add_member_btn"):
+                if st.button("添加", width='stretch', key="add_member_btn"):
                     if new_member:
                         success, msg = join_classroom(new_member, class_code)
                         if success:
@@ -2506,7 +2247,7 @@ def render_class_management():
         # 只有教师可以创建签到
         if is_teacher:
             st.markdown("---")
-            if st.button("➕ 创建新签到活动", use_container_width=True):
+            if st.button("➕ 创建新签到活动", width='stretch'):
                 st.session_state.current_page = "create_attendance"
                 st.rerun()
     
@@ -2542,7 +2283,7 @@ def render_class_management():
                 height=400
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("暂无数据可分析")
     
@@ -2560,44 +2301,12 @@ def render_class_management():
             new_class_name = st.text_input("班级名称", value=class_name, key="new_class_name")
             new_description = st.text_area("班级描述", value=description or "", height=100, key="new_description")
         
-        # 数据保存按钮
-        if st.button("💾 保存修改", key="save_class_changes"):
-            if new_class_name:
-                success, message = update_classroom_info(
-                    class_code,
-                    teacher_username,
-                    class_name=new_class_name,
-                    description=new_description
-                )
-                if success:
-                    st.success(message)
-                    st.rerun()
-                else:
-                    st.error(message)
-            else:
-                st.warning("班级名称不能为空")
-        
-        # 删除班级
-        st.markdown("---")
-        st.markdown("### 🗑️ 删除班级")
-        st.warning("⚠️ 删除班级操作不可逆，请谨慎操作！")
-        
-        delete_option = st.selectbox(
-            "选择删除方式",
-            ["软删除（标记为不活跃）", "硬删除（永久删除所有数据）"],
-            key="delete_option"
-        )
-        
-        if st.button("确认删除班级", type="secondary", key="confirm_delete"):
-            delete_type = "soft" if delete_option == "软删除（标记为不活跃）" else "hard"
-            success, message = delete_classroom_enhanced(class_code, teacher_username, delete_type)
-            if success:
-                st.success(message)
-                time.sleep(2)
-                st.session_state.current_page = "teacher_dashboard"
-                st.rerun()
-            else:
-                st.error(message)
+
+
+
+
+
+
 
 def render_create_attendance():
     """创建签到活动页面"""
@@ -2639,13 +2348,14 @@ def render_create_attendance():
                                       options=['standard'],
                                       format_func=lambda x: {
                                           'standard': '标准签到'
+
                                       }[x],
                                       key="attendance_type_select")
     
     col3, col4 = st.columns(2)
     
     with col3:
-        # 使用正确的函数名 st.date_input 和 st.time_input
+        # 修复：使用正确的函数名 st.date_input 和 st.time_input
         date_val = st.date_input("📅 签到日期", 
                                value=get_beijing_time().date(),
                                min_value=get_beijing_time().date(),
@@ -2672,10 +2382,10 @@ def render_create_attendance():
     col_btn1, col_btn2 = st.columns(2)
     
     with col_btn1:
-        create_btn = st.button("🚀 创建签到", use_container_width=True, type="primary", key="create_attendance_btn")
+        create_btn = st.button("🚀 创建签到", width='stretch', type="primary", key="create_attendance_btn")
     
     with col_btn2:
-        cancel_btn = st.button("❌ 取消", use_container_width=True, key="cancel_attendance_btn")
+        cancel_btn = st.button("❌ 取消", width='stretch', key="cancel_attendance_btn")
     
     if cancel_btn:
         st.session_state.current_page = "teacher_dashboard"
@@ -2721,11 +2431,11 @@ def render_create_attendance():
                     # 操作按钮
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("📋 复制签到代码", use_container_width=True, key="copy_code_btn"):
+                        if st.button("📋 复制签到代码", width='stretch', key="copy_code_btn"):
                             st.toast("签到代码已复制到剪贴板")
                     
                     with col2:
-                        if st.button("📊 查看签到详情", use_container_width=True, key="view_detail_btn"):
+                        if st.button("📊 查看签到详情", width='stretch', key="view_detail_btn"):
                             st.session_state.selected_session = result
                             st.session_state.current_page = "attendance_detail"
                             st.rerun()
@@ -2751,7 +2461,7 @@ def render_attendance_checkin():
     
     # 获取学生可用的签到活动
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         # 获取学生加入的班级
@@ -2864,7 +2574,7 @@ def render_attendance_checkin():
                             """, unsafe_allow_html=True)
                         
                         with col2:
-                            if st.button("签到", key=f"checkin_{session_code}", use_container_width=True):
+                            if st.button("签到", key=f"checkin_{session_code}", width='stretch'):
                                 with st.spinner("正在签到..."):
                                     success, msg = check_in_attendance(
                                         session_code, 
@@ -2916,7 +2626,7 @@ def render_attendance_checkin():
             manual_code = st.text_input("输入签到代码", placeholder="请输入6位签到代码", key="manual_code_input")
         
         with col2:
-            if st.button("提交", use_container_width=True, key="manual_submit_btn"):
+            if st.button("提交", width='stretch', key="manual_submit_btn"):
                 if manual_code:
                     with st.spinner("正在验证签到代码..."):
                         success, msg = check_in_attendance(
@@ -2955,7 +2665,7 @@ def render_find_classroom():
         if class_code:
             # 查询班级信息
             try:
-                conn = sqlite3.connect(DB_FILENAME)
+                conn = sqlite3.connect('image_processing_platform.db')
                 c = conn.cursor()
                 
                 c.execute("""
@@ -3003,7 +2713,7 @@ def render_find_classroom():
                         if current_students >= max_students:
                             st.error("⚠️ 班级人数已满")
                         else:
-                            if st.button("🎯 加入班级", type="primary", use_container_width=True, key="join_class_btn"):
+                            if st.button("🎯 加入班级", type="primary", width='stretch', key="join_class_btn"):
                                 success, msg = join_classroom(st.session_state.username, class_code)
                                 if success:
                                     st.success(msg)
@@ -3023,7 +2733,7 @@ def render_find_classroom():
         
         if class_name_keyword:
             try:
-                conn = sqlite3.connect(DB_FILENAME)
+                conn = sqlite3.connect('image_processing_platform.db')
                 c = conn.cursor()
                 
                 c.execute("""
@@ -3063,7 +2773,7 @@ def render_find_classroom():
                                     <p style='margin: 5px 0; color: #6b7280; font-size: 0.9rem;'>
                                     人数: {current_students}/{max_students}
                                     </p>
-                                    <p style='margin: 5px 0; color: #6b7280; font-size: 0.9rem;'>
+                                    <p style'margin: 5px 0; color: #6b7280; font-size: 0.9rem;'>
                                     {description[:100] if description else '暂无描述'}...
                                     </p>
                                 </div>
@@ -3090,7 +2800,7 @@ def render_subscription_plans():
     
     # 获取订阅套餐
     try:
-        conn = sqlite3.connect(DB_FILENAME)
+        conn = sqlite3.connect('image_processing_platform.db')
         c = conn.cursor()
         
         c.execute("""
@@ -3146,7 +2856,7 @@ def render_subscription_plans():
                     """, unsafe_allow_html=True)
                     
                     if plan_code != "free":
-                        if st.button(f"选择{plan_name}", key=f"plan_{plan_code}", use_container_width=True):
+                        if st.button(f"选择{plan_name}", key=f"plan_{plan_code}", width='stretch'):
                             # 这里实现支付逻辑
                             st.info(f"选择套餐: {plan_name}")
                             # 在实际应用中，这里应该跳转到支付页面
@@ -3175,7 +2885,7 @@ def render_subscription_plans():
                 """, unsafe_allow_html=True)
             
             with col2:
-                if st.button("联系我们", use_container_width=True, key="contact_us_btn"):
+                if st.button("联系我们", width='stretch', key="contact_us_btn"):
                     st.info("请联系: business@example.com")
         
     except Exception as e:
@@ -3236,7 +2946,7 @@ def render_attendance_detail():
             })
         
         df_records = pd.DataFrame(records_data)
-        st.dataframe(df_records, use_container_width=True, hide_index=True)
+        st.dataframe(df_records, width='stretch', hide_index=True)
         
         # 导出数据
         csv = df_records.to_csv(index=False).encode('utf-8')
@@ -3245,7 +2955,7 @@ def render_attendance_detail():
             data=csv,
             file_name=f"attendance_{session_code}.csv",
             mime="text/csv",
-            use_container_width=True
+            width='stretch'
         )
     else:
         st.info("暂无签到记录")
@@ -3274,7 +2984,7 @@ def render_attendance_detail():
             height=300
         )
         
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width='stretch')
 
 def render_student_classes():
     """学生班级页面"""
@@ -3336,7 +3046,7 @@ def render_student_classes():
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("🔍 查找班级", use_container_width=True, type="primary"):
+            if st.button("🔍 查找班级", width='stretch', type="primary"):
                 st.session_state.current_page = "find_classroom"
                 st.rerun()
 
