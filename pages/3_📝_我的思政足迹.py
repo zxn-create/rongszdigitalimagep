@@ -612,8 +612,7 @@ def render_sidebar():
             st.switch_page("pages/1_🔬_图像处理实验室.py")
         if st.button("📝 智能与传统图片处理", use_container_width=True):
             # 使用JavaScript在新标签页打开链接
-            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
-            st.components.v1.html(js, height=0)
+            st.switch_page("pages/智能与传统图片处理.py")
         if st.button("🏫加入班级与在线签到", width='stretch'):
             st.switch_page("pages/分班和在线签到.py")
         if st.button("📤 实验作业提交", width='stretch'):

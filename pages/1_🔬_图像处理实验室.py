@@ -802,7 +802,35 @@ def create_zip_file(submission_id, student_username):
                     zipf.write(file_path, os.path.relpath(file_path, submission_dir))
         return zip_path
     return None
+def get_example_images():
+    """获取素材库中的图像文件"""
+    example_dir = "examples"
+    example_files = []
+    
+    if os.path.exists(example_dir):
+        # 获取所有支持的图像文件
+        supported_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff')
+        for file in os.listdir(example_dir):
+            if file.lower().endswith(supported_extensions):
+                example_files.append(file)
+    
+    return sorted(example_files)  # 按名称排序
 
+def load_example_image(filename):
+    """加载素材库中的图像"""
+    example_path = os.path.join("examples", filename)
+    
+    # 创建一个类似上传文件的对象
+    class ExampleFile:
+        def __init__(self, path):
+            self.name = os.path.basename(path)
+            self.path = path
+        
+        def read(self):
+            with open(self.path, 'rb') as f:
+                return f.read()
+    
+    return ExampleFile(example_path)
 def submit_experiment(student_username, experiment_number, experiment_title, submission_content, uploaded_files):
     """提交实验"""
     try:
@@ -1793,41 +1821,112 @@ def apply_pastel_effect(image, softness=0.7):
 # 10. 风格迁移效果
 def apply_van_gogh_style(image, twist_strength=0.001):
     """梵高风格（简化版）- 减小旋转程度"""
-    height, width = image.shape[:2]
+    try:
+        height, width = image.shape[:2]
+        
+        # 确保图像是BGR格式
+        if len(image.shape) != 3:
+            # 如果是灰度图，转换为BGR
+            if len(image.shape) == 2:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            else:
+                # 创建默认的BGR图像
+                image = np.stack([image] * 3, axis=2) if len(image.shape) == 2 else image
+        
+        # 1. 增强色彩饱和度
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        hsv = hsv.astype(np.float32)
+        hsv[:,:,1] = np.clip(hsv[:,:,1] * 1.5, 0, 255)
+        hsv = hsv.astype(np.uint8)
+        vivid = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        
+        # 2. 添加油画效果 - 修复 xphoto 不可用的问题
+        try:
+            # 检查 xphoto 模块是否存在
+            if hasattr(cv2, 'xphoto') and hasattr(cv2.xphoto, 'oilPainting'):
+                oil_painting = cv2.xphoto.oilPainting(vivid, 7, 30)
+            else:
+                raise AttributeError("xphoto module not available")
+        except (AttributeError, Exception):
+            # 如果 xphoto 不可用，使用替代方法
+            oil_painting = cv2.stylization(vivid, sigma_s=60, sigma_r=0.6)
+            # 增加一些纹理效果
+            oil_painting = cv2.bilateralFilter(oil_painting, 9, 75, 75)
+        
+        # 3. 添加旋转扭曲（减小旋转强度）
+        result = np.zeros_like(oil_painting, dtype=np.float32)
+        center_x, center_y = width // 2, height // 2
+        
+        # 使用矢量操作加速
+        y_coords, x_coords = np.mgrid[0:height, 0:width]
+        dx = x_coords - center_x
+        dy = y_coords - center_y
+        distance = np.sqrt(dx*dx + dy*dy)
+        
+        # 使用较小的扭曲强度
+        twist_angle = distance * twist_strength
+        angle = np.arctan2(dy, dx) + twist_angle
+        
+        src_x = (center_x + distance * np.cos(angle)).astype(np.int32)
+        src_y = (center_y + distance * np.sin(angle)).astype(np.int32)
+        
+        # 边界检查
+        src_x = np.clip(src_x, 0, width-1)
+        src_y = np.clip(src_y, 0, height-1)
+        
+        result = oil_painting[src_y, src_x]
+        
+        return result.astype(np.uint8)
     
-    # 1. 增强色彩饱和度
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    hsv[:,:,1] = cv2.multiply(hsv[:,:,1], 1.5).clip(0, 255)
-    vivid = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    except Exception as e:
+        # 如果发生任何错误，返回原始图像
+        print(f"Warning: apply_van_gogh_style failed: {e}")
+        return image.copy() if isinstance(image, np.ndarray) else image
+def apply_oil_painting_effect(image, radius=3, intensity=30, enhance_color=True):
+    """油画效果"""
+    try:
+        # 确保输入是uint8
+        if image.dtype != np.uint8:
+            image = image.astype(np.uint8)
+        
+        # 确保图像是BGR格式
+        if len(image.shape) != 3:
+            # 如果是灰度图，转换为BGR
+            if len(image.shape) == 2:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            else:
+                # 创建默认的BGR图像
+                image = np.stack([image] * 3, axis=2) if len(image.shape) == 2 else image
+        
+        try:
+            # 检查 xphoto 模块是否存在
+            if hasattr(cv2, 'xphoto') and hasattr(cv2.xphoto, 'oilPainting'):
+                oil_painting = cv2.xphoto.oilPainting(image, radius, intensity)
+            else:
+                raise AttributeError("xphoto module not available")
+        except (AttributeError, Exception):
+            # 如果 xphoto 不可用，使用替代方法
+            # 使用 stylization 模拟油画效果
+            oil_painting = cv2.stylization(image, sigma_s=60, sigma_r=0.6)
+            # 添加一些纹理增强
+            kernel_size = radius * 2 + 1
+            if kernel_size > 1:
+                oil_painting = cv2.medianBlur(oil_painting, kernel_size)
+        
+        if enhance_color:
+            # 增强色彩饱和度
+            hsv = cv2.cvtColor(oil_painting, cv2.COLOR_BGR2HSV)
+            hsv = hsv.astype(np.float32)
+            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.2, 0, 255)
+            hsv = np.clip(hsv, 0, 255).astype(np.uint8)
+            oil_painting = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        
+        return oil_painting.astype(np.uint8)
     
-    # 2. 添加油画效果
-    oil_painting = cv2.xphoto.oilPainting(vivid, 7, 30)
-    
-    # 3. 添加旋转扭曲（减小旋转强度）
-    result = np.zeros_like(oil_painting, dtype=np.float32)
-    center_x, center_y = width // 2, height // 2
-    
-    # 使用矢量操作加速
-    y_coords, x_coords = np.mgrid[0:height, 0:width]
-    dx = x_coords - center_x
-    dy = y_coords - center_y
-    distance = np.sqrt(dx*dx + dy*dy)
-    
-    # 使用较小的扭曲强度
-    twist_angle = distance * twist_strength
-    angle = np.arctan2(dy, dx) + twist_angle
-    
-    src_x = (center_x + distance * np.cos(angle)).astype(np.int32)
-    src_y = (center_y + distance * np.sin(angle)).astype(np.int32)
-    
-    # 边界检查
-    src_x = np.clip(src_x, 0, width-1)
-    src_y = np.clip(src_y, 0, height-1)
-    
-    result = oil_painting[src_y, src_x]
-    
-    return result.astype(np.uint8)
-
+    except Exception as e:
+        # 如果发生任何错误，返回原始图像
+        print(f"Warning: apply_oil_painting_effect failed: {e}")
+        return image.copy() if isinstance(image, np.ndarray) else image
 def apply_starry_sky_style(image):
     """星空风格（梵高《星空》效果）- 优化"""
     # 1. 增强蓝色调和黄色调
@@ -2717,8 +2816,7 @@ def render_sidebar():
             st.switch_page("pages/1_🔬_图像处理实验室.py")
         if st.button("📝 智能与传统图片处理", use_container_width=True):
             # 使用JavaScript在新标签页打开链接
-            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
-            st.components.v1.html(js, height=0)
+            st.switch_page("pages/智能与传统图片处理.py")
         if st.button("📤 实验作业提交", use_container_width=True):
             st.switch_page("pages/实验作业提交.py")
         if st.button("📚 学习资源中心", use_container_width=True):
@@ -2873,11 +2971,34 @@ with tabs[0]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab1_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab1_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab1_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -2960,8 +3081,7 @@ with tabs[0]:
                     unique_key_suffix="tab1_enhance"
                 )
     else:
-        st.info("请上传图像文件开始处理")
-
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 # 2. 边缘检测选项卡
 with tabs[1]:
     st.markdown("### 📐 边缘检测算法比较")
@@ -2977,11 +3097,34 @@ with tabs[1]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab2_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab2_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab2_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -3113,7 +3256,7 @@ with tabs[1]:
         st.markdown("### 📷 原始图像参考")
         st.image(image_rgb, caption="原始图像", use_container_width=True)
     else:
-        st.info("请上传图像文件开始处理")
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 
 # 3. 线性变换选项卡
 with tabs[2]:
@@ -3130,11 +3273,34 @@ with tabs[2]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab3_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab3_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab3_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -3307,7 +3473,7 @@ with tabs[2]:
                 unique_key_suffix=f"tab3_{transform_type}"
             )
     else:
-        st.info("请上传图像文件开始处理")
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 
 
 
@@ -3350,11 +3516,34 @@ with tabs[3]:
         - 监控视频的清晰化
         """)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png", "bmp", "webp"], 
-        key="tab4_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab4_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab4_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     # 添加彩色/灰度选项
     processing_mode = st.radio(
@@ -3626,7 +3815,7 @@ with tabs[3]:
     
     else:
         # 没有上传文件时的界面
-        st.info("📤 请上传图像文件开始处理")
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
         
         # 添加示例演示
         if st.checkbox("显示锐化示例", key="sharpen_demo"):
@@ -3671,11 +3860,34 @@ with tabs[4]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab5_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab5_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab5_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -3745,7 +3957,7 @@ with tabs[4]:
                 unique_key_suffix="tab5_quantization"
             )
     else:
-        st.info("请上传图像文件开始处理")
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 
 # 6. 彩色图像分割选项卡
 with tabs[5]:
@@ -3762,11 +3974,34 @@ with tabs[5]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab6_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab6_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab6_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -3840,8 +4075,7 @@ with tabs[5]:
                 unique_key_suffix="tab6_segmentation"
             )
     else:
-        st.info("请上传图像文件开始处理")
-
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 # 7. 颜色通道分析选项卡
 with tabs[6]:
     st.markdown("### 🌈 颜色通道分析")
@@ -3857,11 +4091,34 @@ with tabs[6]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab7_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab7_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab7_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -3963,7 +4220,7 @@ with tabs[6]:
                 unique_key_suffix="tab7_adjusted"
             )
     else:
-        st.info("请上传图像文件开始处理")
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 
 # 8. 特效处理选项卡
 with tabs[7]:
@@ -3980,11 +4237,34 @@ with tabs[7]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab8_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab8_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab8_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -4065,10 +4345,9 @@ with tabs[7]:
                 unique_key_suffix="tab8_effect"  # 添加唯一key后缀避免重复
             )
     else:
-        st.info("请上传图像文件开始处理")
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
                 
                 
-        
 
 # 9. 图像绘画选项卡
 with tabs[8]:
@@ -4085,11 +4364,34 @@ with tabs[8]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab9_upload"
-    )
+    # ===== 双列布局：左侧上传，右侧素材库 =====
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png", "bmp", "webp"], 
+            key="tab9_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab9_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         try:
@@ -4285,9 +4587,12 @@ with tabs[8]:
     
     else:
         # 没有上传文件时的界面
-        st.info("📤 请上传图像文件开始处理")
+        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 
-# 10. 风格迁移选项卡
+
+
+# 底部思政总结
+st.markdown("---")# 10. 风格迁移选项卡
 with tabs[9]:
     st.markdown("### 🌟 风格迁移与艺术化")
     
@@ -4302,11 +4607,34 @@ with tabs[9]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab10_upload"
-    )
+    # 双列布局：左侧上传，右侧素材库
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png"], 
+            key="tab10_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab10_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -4326,7 +4654,7 @@ with tabs[9]:
         if style_type == "梵高风格":
             col1, col2 = st.columns(2)
             with col1:
-                twist_strength = st.slider("扭曲强度", 0.001, 0.02, 0.01, 0.0001, 
+                twist_strength = st.slider("扭曲强度", 0.0001,0.005,0.001,0.0001, 
                                           key="vangogh_twist")
             with col2:
                 color_intensity = st.slider("色彩强度", 0.5, 2.0, 1.5, 0.1, 
@@ -4492,7 +4820,7 @@ with tabs[9]:
                     use_container_width=True
                 )
     else:
-        st.info("📤 请上传图像文件开始艺术创作")
+        st.info("📤 请上传图像文件或从素材库选择开始艺术创作")
         
 # 11. 老照片上色选项卡
 with tabs[10]:
@@ -4509,11 +4837,34 @@ with tabs[10]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择黑白或老旧照片", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab11_upload"
-    )
+    # 双列布局：左侧上传，右侧素材库
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传黑白或老旧照片", 
+            type=["jpg", "jpeg", "png"], 
+            key="tab11_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab11_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -4796,7 +5147,7 @@ with tabs[10]:
                 )
     else:
         # 没有上传文件时的界面
-        st.info("📤 请上传黑白或老旧照片开始上色")
+        st.info("📤 请上传黑白或老旧照片或从素材库选择开始上色")
 
 # 12. 数字形态学选项卡
 with tabs[11]:
@@ -4813,11 +5164,34 @@ with tabs[11]:
     </div>
     """, unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "📤 选择图像文件（推荐二值图像）", 
-        type=["jpg", "jpeg", "png"], 
-        key="tab12_upload"
-    )
+    # 双列布局：左侧上传，右侧素材库
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件（推荐二值图像）", 
+            type=["jpg", "jpeg", "png"], 
+            key="tab12_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="tab12_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
     
     if uploaded_file is not None:
         # 读取图像
@@ -4866,10 +5240,7 @@ with tabs[11]:
         # 下载时传递RGB版本
         provide_download_button(result_rgb, f"morphology_{operation}.jpg", "📥 下载结果")
     else:
-        st.info("请上传图像文件开始处理")
-
-# 底部思政总结
-st.markdown("---")
+        st.info("请上传图像文件或从素材库选择开始处理")
 st.markdown("""
 <div class='ideology-card'>
     <h3>🌟 思政学习总结</h3>
