@@ -1,87 +1,36 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
-import sqlite3
 import bcrypt
 import time
+import os
+from supabase import create_client, Client
 
-# 页面配置
-st.set_page_config(
-    page_title="融思政 - 数字图像处理实验平台",
-    page_icon="🇨🇳",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
-# 数据库核心功能
+# ==================== Supabase 数据库连接 ====================
+@st.cache_resource
+def init_supabase():
+    """初始化 Supabase 客户端（全局单例）"""
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
+
+supabase: Client = init_supabase()
+
+
+# ==================== 数据库操作函数 ====================
+
+def get_beijing_time():
+    """获取北京时间"""
+    utc_now = datetime.utcnow()
+    beijing_time = utc_now + timedelta(hours=8)
+    return beijing_time
+
 def init_db():
-    """初始化数据库，创建用户表和实验提交表"""
-    conn = sqlite3.connect('image_processing_platform.db')
-    c = conn.cursor()
-    # 创建用户表（包含角色字段）
-    c.execute(''' 
-        CREATE TABLE IF NOT EXISTS users ( 
-            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            username TEXT UNIQUE NOT NULL, 
-            password TEXT NOT NULL, 
-            role TEXT NOT NULL, 
-            create_time TEXT NOT NULL 
-        ) 
-    ''')
-    
-    # 创建实验提交表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS experiment_submissions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_username TEXT NOT NULL,
-            experiment_number INTEGER NOT NULL,
-            experiment_title TEXT NOT NULL,
-            submission_content TEXT NOT NULL,
-            submission_time TEXT NOT NULL,
-            status TEXT DEFAULT 'pending',
-            teacher_feedback TEXT DEFAULT '',
-            score INTEGER DEFAULT 0,
-            resubmission_count INTEGER DEFAULT 0,
-            allow_view_score BOOLEAN DEFAULT TRUE,
-            FOREIGN KEY (student_username) REFERENCES users (username)
-        )
-    ''')
-    
-    # 创建思政感悟表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS ideology_reflections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_username TEXT NOT NULL,
-            reflection_content TEXT NOT NULL,
-            submission_time TEXT NOT NULL,
-            status TEXT DEFAULT 'pending',
-            teacher_feedback TEXT DEFAULT '',
-            score INTEGER DEFAULT 0,
-            word_count INTEGER DEFAULT 0,
-            allow_view_score BOOLEAN DEFAULT TRUE,
-            FOREIGN KEY (student_username) REFERENCES users (username)
-        )
-    ''')
-    
-    # 创建学习进度表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS learning_progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            progress_type TEXT NOT NULL,
-            progress_value REAL DEFAULT 0,
-            update_time TEXT NOT NULL,
-            FOREIGN KEY (username) REFERENCES users (username)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    
-    # 创建默认教师账号
+    """初始化数据库（创建默认教师账号）"""
     create_default_teachers()
 
 def create_default_teachers():
@@ -94,64 +43,69 @@ def create_default_teachers():
         {"username": "yhh4", "password": "23123yhh", "role": "teacher"}
     ]
     
-    conn = sqlite3.connect('image_processing_platform.db')
-    c = conn.cursor()
-    
     for teacher in default_teachers:
         try:
             # 检查用户是否已存在
-            c.execute("SELECT id FROM users WHERE username = ?", (teacher["username"],))
-            if c.fetchone() is None:
-                # 密码哈希处理（加盐）
+            result = supabase.table("users").select("id").eq("username", teacher["username"]).execute()
+            
+            if not result.data:
+                # 密码哈希处理
                 salt = bcrypt.gensalt()
                 hashed_password = bcrypt.hashpw(teacher["password"].encode('utf-8'), salt)
-                create_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                c.execute(
-                    "INSERT INTO users (username, password, role, create_time) VALUES (?, ?, ?, ?)", 
-                    (teacher["username"], hashed_password.decode('utf-8'), teacher["role"], create_time)
-                )
+                create_time = get_beijing_time().isoformat()
+                
+                # 插入用户
+                supabase.table("users").insert({
+                    "username": teacher["username"],
+                    "password": hashed_password.decode('utf-8'),
+                    "role": teacher["role"],
+                    "create_time": create_time
+                }).execute()
                 print(f"创建教师账号: {teacher['username']}")
         except Exception as e:
             print(f"创建教师账号 {teacher['username']} 失败: {str(e)}")
     
-    conn.commit()
-    conn.close()
+    # 初始化作业数据
+    init_default_assignments()
 
 def add_user(username, password, role):
     """添加新用户（密码哈希存储）"""
     try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        # 密码哈希处理（加盐）
+        # 检查用户名是否已存在
+        result = supabase.table("users").select("id").eq("username", username).execute()
+        if result.data:
+            return False, "用户名已存在！"
+        
+        # 密码哈希处理
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
-        create_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        c.execute(
-            "INSERT INTO users (username, password, role, create_time) VALUES (?, ?, ?, ?)", 
-            (username, hashed_password.decode('utf-8'), role, create_time)
-        )
-        conn.commit()
-        conn.close()
+        create_time = get_beijing_time().isoformat()
+        
+        # 插入用户
+        supabase.table("users").insert({
+            "username": username,
+            "password": hashed_password.decode('utf-8'),
+            "role": role,
+            "create_time": create_time
+        }).execute()
+        
         return True, "注册成功！"
-    except sqlite3.IntegrityError:
-        return False, "用户名已存在！"
     except Exception as e:
         return False, f"注册失败：{str(e)}"
 
 def verify_user(username, password):
     """验证用户登录（匹配哈希密码）"""
     try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        c.execute("SELECT password, role FROM users WHERE username = ?", (username,))
-        result = c.fetchone()
-        conn.close()
-        if result:
-            hashed_password, role = result
+        result = supabase.table("users").select("password, role").eq("username", username).execute()
+        
+        if result.data:
+            hashed_password = result.data[0]["password"]
+            role = result.data[0]["role"]
+            
             # 验证密码
             if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
-                return True, role  # 登录成功，返回角色
-        return False, None  # 用户名或密码错误
+                return True, role
+        return False, None
     except Exception as e:
         st.error(f"登录验证失败：{str(e)}")
         return False, None
@@ -164,22 +118,15 @@ def change_password(username, old_password, new_password):
         if not success:
             return False, "旧密码错误"
         
-        # 更新为新密码
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
         # 对新密码进行哈希处理
         salt = bcrypt.gensalt()
         hashed_new_password = bcrypt.hashpw(new_password.encode('utf-8'), salt)
         
         # 更新密码
-        c.execute(
-            "UPDATE users SET password = ? WHERE username = ?",
-            (hashed_new_password.decode('utf-8'), username)
-        )
+        supabase.table("users").update({
+            "password": hashed_new_password.decode('utf-8')
+        }).eq("username", username).execute()
         
-        conn.commit()
-        conn.close()
         return True, "密码修改成功！"
     except Exception as e:
         return False, f"修改密码失败：{str(e)}"
@@ -187,26 +134,21 @@ def change_password(username, old_password, new_password):
 def get_user_stats():
     """获取用户统计数据"""
     try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
         # 获取总用户数
-        c.execute("SELECT COUNT(*) FROM users")
-        total_users = c.fetchone()[0]
+        result_users = supabase.table("users").select("*", count="exact").execute()
+        total_users = result_users.count if hasattr(result_users, 'count') else len(result_users.data)
         
         # 获取学生数
-        c.execute("SELECT COUNT(*) FROM users WHERE role = 'student'")
-        student_count = c.fetchone()[0]
+        result_students = supabase.table("users").select("*", count="exact").eq("role", "student").execute()
+        student_count = result_students.count if hasattr(result_students, 'count') else len(result_students.data)
         
         # 获取实验提交总数
-        c.execute("SELECT COUNT(*) FROM experiment_submissions")
-        experiment_count = c.fetchone()[0]
+        result_exp = supabase.table("experiment_submissions").select("*", count="exact").execute()
+        experiment_count = result_exp.count if hasattr(result_exp, 'count') else len(result_exp.data)
         
         # 获取思政感悟总数
-        c.execute("SELECT COUNT(*) FROM ideology_reflections")
-        reflection_count = c.fetchone()[0]
-        
-        conn.close()
+        result_ref = supabase.table("ideology_reflections").select("*", count="exact").execute()
+        reflection_count = result_ref.count if hasattr(result_ref, 'count') else len(result_ref.data)
         
         return {
             'total_users': total_users,
@@ -218,9 +160,136 @@ def get_user_stats():
         print(f"获取统计数据失败: {str(e)}")
         return {'total_users': 0, 'student_count': 0, 'experiment_count': 0, 'reflection_count': 0}
 
-# 初始化数据库（首次运行自动创建）
-init_db()
+def get_experiment_stats():
+    """获取实验作业统计数据"""
+    try:
+        # 获取总提交数
+        result_total = supabase.table("experiment_submissions").select("*", count="exact").execute()
+        total_submissions = result_total.count if hasattr(result_total, 'count') else len(result_total.data)
+        
+        # 获取待批改数
+        result_pending = supabase.table("experiment_submissions").select("*", count="exact").eq("status", "pending").execute()
+        pending_count = result_pending.count if hasattr(result_pending, 'count') else len(result_pending.data)
+        
+        # 获取已评分数
+        result_graded = supabase.table("experiment_submissions").select("*", count="exact").eq("status", "graded").execute()
+        graded_count = result_graded.count if hasattr(result_graded, 'count') else len(result_graded.data)
+        
+        # 获取平均分
+        result_avg = supabase.table("experiment_submissions").select("score").eq("status", "graded").gt("score", 0).execute()
+        scores = [item["score"] for item in result_avg.data if item["score"]]
+        avg_score = round(sum(scores) / len(scores), 1) if scores else 0
+        
+        return {
+            'total_submissions': total_submissions,
+            'pending_count': pending_count,
+            'graded_count': graded_count,
+            'avg_score': avg_score
+        }
+    except Exception as e:
+        print(f"获取作业统计数据失败: {str(e)}")
+        return {'total_submissions': 0, 'pending_count': 0, 'graded_count': 0, 'avg_score': 0}
 
+def get_submission_by_username(username):
+    """获取指定用户的提交情况"""
+    try:
+        # 获取用户提交总数
+        result_total = supabase.table("experiment_submissions").select("*", count="exact").eq("student_username", username).execute()
+        user_total = result_total.count if hasattr(result_total, 'count') else len(result_total.data)
+        
+        # 获取用户已评分数
+        result_graded = supabase.table("experiment_submissions").select("*", count="exact").eq("student_username", username).eq("status", "graded").execute()
+        user_graded = result_graded.count if hasattr(result_graded, 'count') else len(result_graded.data)
+        
+        # 获取用户待批改数
+        result_pending = supabase.table("experiment_submissions").select("*", count="exact").eq("student_username", username).eq("status", "pending").execute()
+        user_pending = result_pending.count if hasattr(result_pending, 'count') else len(result_pending.data)
+        
+        # 获取用户平均分
+        result_avg = supabase.table("experiment_submissions").select("score").eq("student_username", username).eq("status", "graded").gt("score", 0).execute()
+        scores = [item["score"] for item in result_avg.data if item["score"]]
+        user_avg_score = round(sum(scores) / len(scores), 1) if scores else 0
+        
+        return {
+            'user_total': user_total,
+            'user_graded': user_graded,
+            'user_pending': user_pending,
+            'user_avg_score': user_avg_score
+        }
+    except Exception as e:
+        print(f"获取用户提交情况失败: {str(e)}")
+        return {'user_total': 0, 'user_graded': 0, 'user_pending': 0, 'user_avg_score': 0}
+
+def init_default_assignments():
+    """初始化默认作业"""
+    try:
+        # 检查是否已有作业
+        result = supabase.table("assignments").select("*", count="exact").execute()
+        count = result.count if hasattr(result, 'count') else len(result.data)
+        
+        if count == 0:
+            current_time = get_beijing_time().isoformat()
+            
+            # 实验作业
+            experiments = [
+                (1, "图像灰度化处理", "将彩色图像转换为灰度图像，比较不同转换方法的优劣"),
+                (2, "图像边缘检测", "使用Sobel、Canny等算子进行边缘检测"),
+                (3, "图像滤波处理", "实现均值滤波、高斯滤波等去噪方法"),
+                (4, "图像形态学操作", "实现腐蚀、膨胀、开运算、闭运算"),
+                (5, "图像分割技术", "使用阈值分割、区域生长等方法"),
+                (6, "特征提取与匹配", "提取SIFT、ORB等特征并进行匹配"),
+                (7, "图像增强技术", "实现直方图均衡化、对比度增强"),
+                (8, "图像几何变换", "实现旋转、缩放、仿射变换等")
+            ]
+            
+            for num, title, desc in experiments:
+                deadline = (get_beijing_time() + timedelta(days=14+num*7)).isoformat()
+                supabase.table("assignments").insert({
+                    "assignment_type": "experiment",
+                    "assignment_number": num,
+                    "title": title,
+                    "description": desc,
+                    "deadline": deadline,
+                    "created_at": current_time,
+                    "max_score": 100
+                }).execute()
+            
+            # 期中作业
+            midterm_deadline = (get_beijing_time() + timedelta(days=60)).isoformat()
+            supabase.table("assignments").insert({
+                "assignment_type": "midterm",
+                "assignment_number": 1,
+                "title": "图像处理综合应用",
+                "description": "设计并实现一个完整的图像处理应用系统",
+                "deadline": midterm_deadline,
+                "created_at": current_time,
+                "max_score": 100
+            }).execute()
+            
+            # 期末作业
+            final_deadline = (get_beijing_time() + timedelta(days=120)).isoformat()
+            supabase.table("assignments").insert({
+                "assignment_type": "final",
+                "assignment_number": 1,
+                "title": "图像处理项目开发",
+                "description": "开发一个完整的图像处理项目，包含GUI界面和多种处理功能",
+                "deadline": final_deadline,
+                "created_at": current_time,
+                "max_score": 100
+            }).execute()
+    except Exception as e:
+        print(f"初始化默认作业失败: {str(e)}")
+
+# 页面配置
+st.set_page_config(
+    page_title="融思政 - 数字图像处理实验平台",
+    page_icon="🇨🇳",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 初始化数据库
+init_db()
 # 现代化米色思政主题CSS
 def apply_modern_css():
     st.markdown("""
@@ -921,10 +990,6 @@ def render_sidebar():
             st.switch_page("main.py")
         if st.button("🔬 图像处理实验室", use_container_width=True):
             st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("📝 智能与传统图片处理", use_container_width=True):
-            # 使用JavaScript在新标签页打开链接
-            js = """<script>window.open("https://29phcdb33h.coze.site", "_blank");</script>"""
-            st.components.v1.html(js, height=0)
         if st.button("🏫加入班级与在线签到", use_container_width=True):
             st.switch_page("pages/分班和在线签到.py")
         if st.button("📤 实验作业提交", use_container_width=True):
@@ -1276,27 +1341,22 @@ def render_login_dialog():
 def get_experiment_stats():
     """获取实验作业统计数据（仅教师端使用）"""
     try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
         # 获取总提交数
-        c.execute("SELECT COUNT(*) FROM experiment_submissions")
-        total_submissions = c.fetchone()[0]
+        result_total = supabase.table("experiment_submissions").select("*", count="exact").execute()
+        total_submissions = result_total.count if hasattr(result_total, 'count') else len(result_total.data)
         
-        # 获取待批改数（status为'pending'）
-        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE status = 'pending'")
-        pending_count = c.fetchone()[0]
+        # 获取待批改数
+        result_pending = supabase.table("experiment_submissions").select("*", count="exact").eq("status", "pending").execute()
+        pending_count = result_pending.count if hasattr(result_pending, 'count') else len(result_pending.data)
         
-        # 获取已评分数（status为'graded'）
-        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE status = 'graded'")
-        graded_count = c.fetchone()[0]
+        # 获取已评分数
+        result_graded = supabase.table("experiment_submissions").select("*", count="exact").eq("status", "graded").execute()
+        graded_count = result_graded.count if hasattr(result_graded, 'count') else len(result_graded.data)
         
         # 获取平均分
-        c.execute("SELECT AVG(score) FROM experiment_submissions WHERE score > 0")
-        avg_score_result = c.fetchone()[0]
-        avg_score = round(avg_score_result, 1) if avg_score_result else 0
-        
-        conn.close()
+        result_avg = supabase.table("experiment_submissions").select("score").eq("status", "graded").gt("score", 0).execute()
+        scores = [item["score"] for item in result_avg.data if item["score"]]
+        avg_score = round(sum(scores) / len(scores), 1) if scores else 0
         
         return {
             'total_submissions': total_submissions,
@@ -1306,37 +1366,28 @@ def get_experiment_stats():
         }
     except Exception as e:
         print(f"获取作业统计数据失败: {str(e)}")
-        return {
-            'total_submissions': 0,
-            'pending_count': 0,
-            'graded_count': 0,
-            'avg_score': 0
-        }
+        return {'total_submissions': 0, 'pending_count': 0, 'graded_count': 0, 'avg_score': 0}
+
 
 def get_submission_by_username(username):
     """获取指定用户的提交情况"""
     try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
         # 获取用户提交总数
-        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE student_username = ?", (username,))
-        user_total = c.fetchone()[0]
+        result_total = supabase.table("experiment_submissions").select("*", count="exact").eq("student_username", username).execute()
+        user_total = result_total.count if hasattr(result_total, 'count') else len(result_total.data)
         
         # 获取用户已评分数
-        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE student_username = ? AND status = 'graded'", (username,))
-        user_graded = c.fetchone()[0]
+        result_graded = supabase.table("experiment_submissions").select("*", count="exact").eq("student_username", username).eq("status", "graded").execute()
+        user_graded = result_graded.count if hasattr(result_graded, 'count') else len(result_graded.data)
         
         # 获取用户待批改数
-        c.execute("SELECT COUNT(*) FROM experiment_submissions WHERE student_username = ? AND status = 'pending'", (username,))
-        user_pending = c.fetchone()[0]
+        result_pending = supabase.table("experiment_submissions").select("*", count="exact").eq("student_username", username).eq("status", "pending").execute()
+        user_pending = result_pending.count if hasattr(result_pending, 'count') else len(result_pending.data)
         
         # 获取用户平均分
-        c.execute("SELECT AVG(score) FROM experiment_submissions WHERE student_username = ? AND score > 0", (username,))
-        avg_score_result = c.fetchone()[0]
-        user_avg_score = round(avg_score_result, 1) if avg_score_result else 0
-        
-        conn.close()
+        result_avg = supabase.table("experiment_submissions").select("score").eq("student_username", username).eq("status", "graded").gt("score", 0).execute()
+        scores = [item["score"] for item in result_avg.data if item["score"]]
+        user_avg_score = round(sum(scores) / len(scores), 1) if scores else 0
         
         return {
             'user_total': user_total,
@@ -1346,12 +1397,7 @@ def get_submission_by_username(username):
         }
     except Exception as e:
         print(f"获取用户提交情况失败: {str(e)}")
-        return {
-            'user_total': 0,
-            'user_graded': 0,
-            'user_pending': 0,
-            'user_avg_score': 0
-        }
+        return {'user_total': 0, 'user_graded': 0, 'user_pending': 0, 'user_avg_score': 0}
 
 def main():
     # 初始化session_state
