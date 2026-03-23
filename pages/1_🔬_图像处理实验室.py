@@ -15,11 +15,60 @@ import pandas as pd
 import random
 from scipy import ndimage
 from scipy.signal import convolve2d
+import matplotlib
 import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']  # 设置中文字体
-plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
+
+import base64
+import matplotlib
+import matplotlib.font_manager as fm
+import matplotlib.pyplot as plt
+from pathlib import Path
+import tempfile
+import os
+
+def setup_chinese_font_base64():
+    """使用Base64编码的字体数据"""
+    # 创建一个简单的黑体字体数据（这里只是示例，实际需要完整的字体文件）
+    # 在实际使用中，你需要有一个真正的字体文件
+    
+    # 方法A：使用系统自带的字体文件
+    try:
+        # 查找系统中可能的中文字体
+        font_files = fm.findSystemFonts()
+        chinese_fonts = []
+        
+        for font_file in font_files:
+            font_name = Path(font_file).stem.lower()
+            if any(keyword in font_name for keyword in ['simhei', 'simsun', 'microsoft', 'yahei', 'kai', 'fang']):
+                chinese_fonts.append(font_file)
+        
+        if chinese_fonts:
+            # 添加字体
+            for font_file in chinese_fonts[:1]:  # 只添加第一个找到的字体
+                fm.fontManager.addfont(font_file)
+                font_name = fm.FontProperties(fname=font_file).get_name()
+                matplotlib.rcParams['font.sans-serif'] = [font_name]
+                matplotlib.rcParams['axes.unicode_minus'] = False
+                return font_name
+    except:
+        pass
+    
+    # 方法B：使用matplotlib内置的字体
+    try:
+        # 尝试DejaVu Sans，它支持一些Unicode字符
+        matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans']
+        matplotlib.rcParams['axes.unicode_minus'] = False
+        return 'DejaVu Sans'
+    except:
+        pass
+    
+    return None
+
+# 调用设置
+font_name = setup_chinese_font_base64()
+# ========== 辅助函数 ==========
 st.set_page_config(
     page_title="图像处理实验室 - 融思政平台",
     page_icon="🔬",
@@ -1098,6 +1147,7 @@ def apply_sharpen_filter(image, kernel_size=3):
     """
     应用锐化滤波器
     kernel_size: 滤波器大小，必须是奇数
+    支持彩色图像处理
     """
     # 确保kernel_size是奇数
     if kernel_size % 2 == 0:
@@ -1115,7 +1165,7 @@ def apply_sharpen_filter(image, kernel_size=3):
             else:
                 kernel_sharpen[i, j] = -1
     
-    # 应用滤波器
+    # 应用滤波器 - 彩色图像直接对每个通道处理
     sharpened = cv2.filter2D(image, -1, kernel_sharpen)
     
     # 可选：归一化结果
@@ -1128,8 +1178,9 @@ def apply_unsharp_masking(image, sigma=1.0, amount=1.0):
     应用非锐化掩蔽
     sigma: 高斯模糊的标准差
     amount: 锐化程度
+    支持彩色图像处理
     """
-    # 高斯模糊
+    # 高斯模糊 - 直接应用于彩色图像
     blurred = cv2.GaussianBlur(image, (0, 0), sigma)
     
     # 计算原始与模糊的差异
@@ -1146,29 +1197,30 @@ def apply_unsharp_masking(image, sigma=1.0, amount=1.0):
 def apply_laplacian_sharpening(image):
     """
     拉普拉斯锐化
+    支持彩色图像处理
     """
-    # 转换为灰度
+    # 对彩色图像的每个通道分别处理
     if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image.copy()
-    
-    # 拉普拉斯算子
-    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-    
-    # 转换为8位并增强
-    laplacian = cv2.convertScaleAbs(laplacian)
-    
-    # 加回原图
-    if len(image.shape) == 3:
-        # 彩色图像
-        result = image.copy().astype(np.float32)
-        for i in range(3):
-            result[:, :, i] = np.clip(result[:, :, i] + laplacian, 0, 255)
-        result = result.astype(np.uint8)
+        # 分离通道
+        channels = cv2.split(image)
+        processed_channels = []
+        
+        for channel in channels:
+            # 拉普拉斯算子
+            laplacian = cv2.Laplacian(channel, cv2.CV_64F)
+            # 转换为8位并增强
+            laplacian = cv2.convertScaleAbs(laplacian)
+            # 加回原通道
+            result_channel = cv2.addWeighted(channel, 1.0, laplacian, 0.5, 0)
+            processed_channels.append(result_channel)
+        
+        # 合并通道
+        result = cv2.merge(processed_channels)
     else:
         # 灰度图像
-        result = cv2.addWeighted(gray, 1.0, laplacian, 0.5, 0)
+        laplacian = cv2.Laplacian(image, cv2.CV_64F)
+        laplacian = cv2.convertScaleAbs(laplacian)
+        result = cv2.addWeighted(image, 1.0, laplacian, 0.5, 0)
     
     return result
 
@@ -1195,8 +1247,9 @@ def apply_adaptive_sharpen(image, strength=0.5):
     """
     自适应锐化，基于边缘检测
     strength: 锐化强度 (0-1)
+    支持彩色图像处理
     """
-    # 边缘检测
+    # 边缘检测（使用灰度图）
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
@@ -1204,21 +1257,21 @@ def apply_adaptive_sharpen(image, strength=0.5):
     
     edges = cv2.Canny(gray, 50, 150)
     
-    # 创建边缘遮罩
+    # 创建边缘遮罩（3通道）
     edges_mask = edges.astype(np.float32) / 255.0
     
-    # 应用锐化（仅在有边缘的区域）
+    # 应用锐化
     sharpened = apply_unsharp_masking(image, sigma=1.0, amount=strength*3)
     
     # 混合：边缘区域用锐化，其他区域用原图
     if len(image.shape) == 3:
-        edges_mask = cv2.cvtColor(edges_mask, cv2.COLOR_GRAY2BGR)
+        # 扩展边缘掩码到3通道
+        edges_mask = cv2.merge([edges_mask, edges_mask, edges_mask])
     
     result = image * (1 - edges_mask) + sharpened * edges_mask
     result = np.clip(result, 0, 255).astype(np.uint8)
     
     return result
-
 # 5. 采样与量化函数
 def apply_sampling(image, ratio=2):
     """图像采样"""
@@ -2626,16 +2679,10 @@ def provide_download_button(image_rgb, filename, button_text, unique_key_suffix=
     except Exception as e:
         st.error(f"下载功能出错: {str(e)}")
 
-def create_color_histogram(image_rgb, title="颜色直方图"):
+def create_color_histogram(image_rgb, title="Color Histogram"):
     """
     创建RGB颜色直方图并返回Matplotlib图形
-    
-    Args:
-        image_rgb: RGB格式的图像数组（或灰度图）
-        title: 直方图标题
-    
-    Returns:
-        fig: Matplotlib图形对象
+    使用英文标题避免字体问题
     """
     # 检查图像维度
     if len(image_rgb.shape) == 2:
@@ -2654,10 +2701,10 @@ def create_color_histogram(image_rgb, title="颜色直方图"):
         # 绘制直方图（灰色）
         ax.plot(hist_gray, color='gray', label='Gray', alpha=0.7, linewidth=2)
         
-        # 设置图形属性
+        # 设置图形属性（使用英文）
         ax.set_title(title, fontsize=14, fontweight='bold', color='#333')
-        ax.set_xlabel('像素强度', fontsize=12)
-        ax.set_ylabel('归一化频率', fontsize=12)
+        ax.set_xlabel('Pixel Intensity', fontsize=12)
+        ax.set_ylabel('Normalized Frequency', fontsize=12)
         ax.grid(True, alpha=0.3)
         ax.legend()
         
@@ -2686,20 +2733,12 @@ def create_color_histogram(image_rgb, title="颜色直方图"):
         ax.plot(hist_g, color='green', label='Green', alpha=0.7, linewidth=2)
         ax.plot(hist_b, color='blue', label='Blue', alpha=0.7, linewidth=2)
         
-        # 设置图形属性
+        # 设置图形属性（使用英文）
         ax.set_title(title, fontsize=14, fontweight='bold', color='#333')
-        ax.set_xlabel('像素强度', fontsize=12)
-        ax.set_ylabel('归一化频率', fontsize=12)
+        ax.set_xlabel('Pixel Intensity', fontsize=12)
+        ax.set_ylabel('Normalized Frequency', fontsize=12)
         ax.grid(True, alpha=0.3)
         ax.legend()
-    
-    else:
-        # 未知格式
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.text(0.5, 0.5, '无法生成直方图\n图像格式不支持', 
-                horizontalalignment='center', verticalalignment='center',
-                transform=ax.transAxes, fontsize=12, color='red')
-        ax.set_title(title, fontsize=14, fontweight='bold', color='#333')
     
     # 设置背景色
     fig.patch.set_facecolor('#f8f9fa')
@@ -2778,7 +2817,7 @@ def display_comparison_with_histograms(original_rgb, processed_rgb, original_tit
         
         # 原始图像直方图
         with st.expander("📊 原始图像颜色直方图", expanded=True):
-            fig_orig = create_color_histogram(original_rgb, "原始图像颜色分布")
+            fig_orig = create_color_histogram(original_rgb, "Original Image Histogram")
             st.pyplot(fig_orig)
     
     with col2:
@@ -2788,7 +2827,7 @@ def display_comparison_with_histograms(original_rgb, processed_rgb, original_tit
         
         # 处理后图像直方图
         with st.expander("📊 处理后图像颜色直方图", expanded=True):
-            fig_proc = create_color_histogram(processed_rgb, "处理后图像颜色分布")
+            fig_proc = create_color_histogram(processed_rgb, "Processed Image Histogram")
             st.pyplot(fig_proc)
     
     # 分割线

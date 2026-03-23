@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import datetime
-import sqlite3
 import json
 import os
 import zipfile
@@ -10,6 +9,8 @@ import tempfile
 import shutil
 import csv
 import io
+from supabase import create_client, Client
+import pytz
 
 st.set_page_config(
     page_title="思政成果展示", 
@@ -18,10 +19,21 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 设置时区为北京时间
+# ==================== Supabase 初始化 ====================
+@st.cache_resource
+def init_supabase():
+    """初始化 Supabase 客户端"""
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
+
+supabase: Client = init_supabase()
+
+# ==================== 北京时间处理 ====================
 def get_beijing_time():
     """获取北京时间"""
-    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+    beijing_tz = pytz.timezone('Asia/Shanghai')
+    return datetime.datetime.now(beijing_tz)
 
 def format_beijing_time(timestamp):
     """格式化时间为北京时间字符串"""
@@ -60,7 +72,7 @@ def format_beijing_time(timestamp):
     
     return str(timestamp)
 
-# 现代化米色思政主题CSS
+# 应用CSS样式（保持不变）
 def apply_modern_css():
     st.markdown("""
     <style>
@@ -79,12 +91,18 @@ def apply_modern_css():
         --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
         --hover-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
     }
-    
+
     /* 整体页面背景 - 米色渐变 */
     .stApp {
         background: linear-gradient(135deg, #fefaf0 0%, #fdf6e3 50%, #faf0d9 100%);
     }
-    
+
+    /* 主容器 */
+    .main-container {
+        background: linear-gradient(135deg, #fefaf0 0%, #fdf6e3 50%, #faf0d9 100%);
+        min-height: 100vh;
+    }
+
     /* 现代化头部 */
     .modern-header {
         background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%);
@@ -98,7 +116,7 @@ def apply_modern_css():
         overflow: hidden;
         border: 1px solid rgba(255, 255, 255, 0.2);
     }
-    
+
     .main-title {
         font-size: 2.5rem;
         margin-bottom: 15px;
@@ -110,8 +128,20 @@ def apply_modern_css():
         -webkit-text-fill-color: transparent;
         text-align: center;
     }
-    
-    .achievement-card {
+
+    .subtitle {
+        font-size: 1.3rem;
+        opacity: 0.95;
+        line-height: 1.6;
+        max-width: 800px;
+        margin: 0 auto;
+        font-weight: 300;
+        position: relative;
+        text-align: center;
+    }
+
+    /* 资源卡片样式 */
+    .resource-card {
         background: linear-gradient(135deg, #fff, var(--beige-light));
         padding: 30px;
         border-radius: 20px;
@@ -121,66 +151,24 @@ def apply_modern_css():
         transition: all 0.3s ease;
         border: 1px solid #e5e7eb;
     }
-    
-    .achievement-card:hover {
+
+    .resource-card:hover {
         transform: translateY(-5px);
         box-shadow: var(--hover-shadow);
     }
-    
-    .project-card {
-        background: linear-gradient(135deg, #fff, var(--beige-light));
-        padding: 25px;
-        border-radius: 15px;
-        margin: 15px 0;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
+
+    .resource-card.tech {
+        border-left: 5px solid #3b82f6;
     }
-    
-    .project-card:hover {
-        transform: translateY(-5px);
-        box-shadow: var(--hover-shadow);
+
+    .resource-card.tutorial {
+        border-left: 5px solid #10b981;
     }
-    
-    .project-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 5px;
-        height: 100%;
-        background: linear-gradient(135deg, var(--primary-red), var(--accent-red));
+
+    .resource-card.tool {
+        border-left: 5px solid #f59e0b;
     }
-    
-    .ideology-badge {
-        display: inline-block;
-        background: linear-gradient(135deg, var(--primary-red), var(--accent-red));
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin: 2px;
-    }
-    
-    .ideology-badge.blue {
-        background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-    }
-    
-    .ideology-badge.green {
-        background: linear-gradient(135deg, #10b981, #047857);
-    }
-    
-    .ideology-badge.yellow {
-        background: linear-gradient(135deg, #f59e0b, #d97706);
-    }
-    
-    .ideology-badge.purple {
-        background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-    }
-    
+
     .section-title {
         color: var(--primary-red);
         font-size: 2rem;
@@ -189,7 +177,7 @@ def apply_modern_css():
         padding-bottom: 10px;
         font-weight: 700;
     }
-    
+
     /* 现代化按钮 - 红白渐变悬浮效果 */
     .stButton button {
         background: linear-gradient(135deg, #ffffff, #fef2f2);
@@ -248,224 +236,344 @@ def apply_modern_css():
         padding-bottom: 2rem;
         background: linear-gradient(135deg, #fefaf0 0%, #fdf6e3 50%, #faf0d9 100%);
     }
-    
+
     /* 侧边栏样式 - 米色渐变 */
     section[data-testid="stSidebar"] {
         background: linear-gradient(135deg, #fdf6e3 0%, #faf0d9 50%, #f5e6c8 100%) !important;
     }
-    
+
     .css-1d391kg {
         background: linear-gradient(135deg, #fdf6e3 0%, #faf0d9 50%, #f5e6c8 100%) !important;
     }
-    
-    /* 审核状态标签样式 */
-    .status-pending {
-        background: linear-gradient(135deg, #f59e0b, #d97706);
+
+    /* 标签页样式 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2px;
+        background-color: #f8f9fa;
+        padding: 8px;
+        border-radius: 12px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f8f9fa;
+        border-radius: 8px 8px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: var(--primary-red);
+        color: white;
+    }
+
+    /* 进度条样式 */
+    .progress-container {
+        background: #f1f5f9;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+
+    .progress-bar {
+        background: linear-gradient(135deg, var(--primary-red), var(--accent-red));
+        height: 8px;
+        border-radius: 4px;
+        margin-top: 5px;
+    }
+
+    /* 徽章样式 */
+    .badge {
+        display: inline-block;
+        background: linear-gradient(135deg, var(--primary-red), var(--accent-red));
         color: white;
         padding: 4px 12px;
         border-radius: 20px;
-        font-size: 0.9rem;
+        font-size: 0.8rem;
         font-weight: 600;
+        margin: 2px;
     }
-    
-    .status-approved {
+
+    .badge.blue {
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    }
+
+    .badge.green {
         background: linear-gradient(135deg, #10b981, #047857);
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: 600;
     }
-    
-    .status-rejected {
-        background: linear-gradient(135deg, #ef4444, #dc2626);
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: 600;
+
+    .badge.yellow {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
     }
-    
+
     /* 响应式设计 */
     @media (max-width: 768px) {
         .main-title {
             font-size: 2rem;
         }
+        .subtitle {
+            font-size: 1.1rem;
+        }
+        .resource-card {
+            padding: 20px;
+        }
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 初始化数据库 - 修复版本
-def init_database():
-    """初始化数据库表 - 修复FOREIGN KEY错误"""
+# ==================== Supabase 数据库操作函数 ====================
+
+def verify_teacher_role(username):
+    """校验用户是否为教师角色"""
     try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
-        # 检查 submitted_projects 表是否存在并获取其列信息
-        c.execute("PRAGMA table_info(submitted_projects)")
-        existing_columns = [column[1] for column in c.fetchall()]
-        
-        # 如果表不存在，创建完整的表结构（不带外键约束）
-        if not existing_columns:
-            c.execute('''
-                CREATE TABLE submitted_projects (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_name TEXT NOT NULL,
-                    author_name TEXT NOT NULL,
-                    project_desc TEXT NOT NULL,
-                    submit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    files TEXT,
-                    file_paths TEXT,
-                    status TEXT DEFAULT '待审核',
-                    review_notes TEXT,
-                    review_time TIMESTAMP,
-                    reviewer TEXT,
-                    user_id INTEGER
-                )
-            ''')
-        else:
-            # 检查并添加缺失的字段
-            if 'file_paths' not in existing_columns:
-                try:
-                    c.execute('ALTER TABLE submitted_projects ADD COLUMN file_paths TEXT')
-                except:
-                    pass
-            
-            if 'reviewer' not in existing_columns:
-                try:
-                    c.execute('ALTER TABLE submitted_projects ADD COLUMN reviewer TEXT')
-                except:
-                    pass
-            
-            if 'user_id' not in existing_columns:
-                try:
-                    c.execute('ALTER TABLE submitted_projects ADD COLUMN user_id INTEGER')
-                except:
-                    pass
-        
-        # 创建意见反馈表
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS feedback (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                feedback_content TEXT NOT NULL,
-                submit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                ip_address TEXT,
-                user_agent TEXT
-            )
-        ''')
-        
-        # 创建用户表（如果不存在）
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                role TEXT DEFAULT 'student',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-        return True
+        result = supabase.table("users").select("role").eq("username", username).execute()
+        if result.data:
+            return result.data[0].get("role") == "teacher"
+        return False
     except Exception as e:
-        st.error(f"数据库初始化失败：{str(e)}")
+        st.error(f"验证教师角色失败：{str(e)}")
         return False
 
-# 渲染侧边栏 - 修复版本
-def render_sidebar():
-    with st.sidebar:
-        st.markdown("""
-        <div style='background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; 
-            padding: 25px; border-radius: 15px; text-align: center; margin-bottom: 25px;
-            box-shadow: 0 6px 12px rgba(220, 38, 38, 0.3);'>
-            <h3>🏆 思政成果展示</h3>
-            <p style='margin: 10px 0 0 0; font-size: 1rem;'>技术报国 · 思想引领 · 创新发展</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # 快速导航
-        st.markdown("### 🧭 快速导航")
-        
-        if st.button("🏠 返回首页", width='content'):
-            st.switch_page("main.py")
-        if st.button("🔬 图像处理实验室", width='content'):
-            st.switch_page("pages/1_🔬_图像处理实验室.py")
-        if st.button("📝 智能与传统图片处理", use_container_width=True):
-            # 使用JavaScript在新标签页打开链接
-            st.switch_page("pages/智能与传统图片处理.py")
-        if st.button("🏫 加入班级与在线签到", width='content'):
-            st.switch_page("pages/分班和在线签到.py")
-        if st.button("📤 实验作业提交", width='content'):
-            st.switch_page("pages/实验作业提交.py")            
-        if st.button("📚 学习资源中心", width='content'):
-            st.switch_page("pages/2_📚_学习资源中心.py")
-        if st.button("📝 我的思政足迹", width='content'):
-            st.switch_page("pages/3_📝_我的思政足迹.py")
-        if st.button("🏆 成果展示", width='content'):
-            st.switch_page("pages/4_🏆_成果展示.py")
-        
-        # 用户提交记录查看
-        if "logged_in" in st.session_state and st.session_state.logged_in:
-            st.markdown("---")
-            if st.button("📋 我的提交记录", width='content'):
-                st.session_state.show_my_projects = True
-                st.rerun()
-        
-        # 检查是否为教师，显示管理员入口
-        if "logged_in" in st.session_state and st.session_state.logged_in:
-            if verify_teacher_role(st.session_state.username):
-                st.markdown("---")
-                if st.button("🔧 进入教师后台", width='content', type="primary"):
-                    st.session_state.show_admin = True
-                    st.rerun()
-        
-        # 思政学习进度
-        st.markdown("### 📚 思政学习进度")
-        
-        ideology_progress = [
-            {"name": "工匠精神", "icon": "🔧", "progress": 90},
-            {"name": "家国情怀", "icon": "🇨🇳", "progress": 85},
-            {"name": "科学态度", "icon": "🔬", "progress": 78},
-            {"name": "创新意识", "icon": "💡", "progress": 82},
-            {"name": "责任担当", "icon": "⚖️", "progress": 88},
-            {"name": "团队合作", "icon": "🤝", "progress": 80}
-        ]
-        
-        for item in ideology_progress:
-            st.markdown(f"**{item['icon']} {item['name']}**")
-            st.progress(item['progress'] / 100)
-        
-        st.markdown("---")
-        
-        # 思政理论学习
-        st.markdown("### 🎯 思政理论学习")
-        theory_topics = [
-            "新时代工匠精神的内涵与实践",
-            "科技创新与国家发展战略",
-            "社会主义核心价值观与技术伦理",
-            "科学家精神与家国情怀",
-            "数字时代的责任与担当"
-        ]
-        
-        for topic in theory_topics:
-            if st.button(f"📖 {topic}", key=f"theory_{topic}", width='content'):
-                st.info(f"开始学习：{topic}")
-        
-        st.markdown("---")
-        
-        # 思政学习提醒
-        st.markdown("### 💫 思政学习提醒")
-        st.success("""
-        🎯 **本周思政重点：**
-        - 学习科学家精神
-        - 践行工匠精神
-        - 培养家国情怀
-        - 强化责任担当
-        """)
+def get_user_id(username):
+    """获取用户ID"""
+    try:
+        result = supabase.table("users").select("id").eq("username", username).execute()
+        return result.data[0]["id"] if result.data else None
+    except Exception as e:
+        st.error(f"获取用户ID失败：{str(e)}")
+        return None
 
-# 生成优秀作品数据
+def get_feedback_data():
+    """从数据库读取意见反馈数据"""
+    try:
+        result = supabase.table("feedback").select("*").order("submit_time", desc=True).execute()
+        
+        feedback_list = []
+        for idx, row in enumerate(result.data):
+            feedback_list.append({
+                "序号": idx + 1,
+                "反馈内容": row.get("feedback_content", ""),
+                "提交时间": format_beijing_time(row.get("submit_time")),
+                "IP地址": row.get("ip_address", "未知"),
+                "用户代理": row.get("user_agent", "未知")
+            })
+        
+        return feedback_list
+    except Exception as e:
+        st.error(f"读取反馈数据失败：{str(e)}")
+        return []
+
+def save_feedback_to_db(feedback_content):
+    """保存反馈到数据库"""
+    try:
+        # 获取IP地址（简化版）
+        ip_address = "127.0.0.1"
+        user_agent = "未知"
+        
+        data = {
+            "feedback_content": feedback_content,
+            "ip_address": ip_address,
+            "user_agent": user_agent
+        }
+        
+        supabase.table("feedback").insert(data).execute()
+        return True
+    except Exception as e:
+        st.error(f"保存反馈失败：{str(e)}")
+        return False
+
+def save_uploaded_files_to_storage(uploaded_files, project_name, author_name, user_id):
+    """
+    将上传的文件保存到 Supabase Storage，并返回文件名列表和存储路径列表
+    """
+    try:
+        saved_files = []
+        storage_paths = []
+        
+        if uploaded_files:
+            # 为每个文件生成存储路径：user_id/project_name_timestamp/filename
+            timestamp = get_beijing_time().strftime("%Y%m%d%H%M%S")
+            folder_path = f"{user_id}/{project_name}_{timestamp}"
+            
+            for uploaded_file in uploaded_files:
+                # 生成安全的文件名
+                safe_filename = "".join(c for c in uploaded_file.name if c.isalnum() or c in "._- ").rstrip()
+                # 完整存储路径
+                storage_path = f"{folder_path}/{timestamp}_{safe_filename}"
+                
+                # 读取文件内容
+                file_bytes = uploaded_file.getbuffer()
+                
+                # 上传到 Supabase Storage 的 project_files 桶
+                response = supabase.storage.from_("project_files").upload(
+                    path=storage_path,
+                    file=file_bytes.tobytes(),
+                    file_options={"content-type": uploaded_file.type}
+                )
+                
+                saved_files.append(uploaded_file.name)
+                storage_paths.append(storage_path)
+            
+            return saved_files, storage_paths
+    except Exception as e:
+        st.error(f"保存文件到云端失败：{str(e)}")
+        return [], []
+
+def save_submitted_project(project_data):
+    """保存提交的作品到数据库"""
+    try:
+        # 获取用户ID
+        user_id = None
+        if "logged_in" in st.session_state and st.session_state.logged_in:
+            user_id = get_user_id(st.session_state.username)
+        
+        data = {
+            "project_name": project_data['project_name'],
+            "author_name": project_data['author_name'],
+            "project_desc": project_data['project_desc'],
+            "files": json.dumps(project_data.get('files', [])),
+            "storage_paths": json.dumps(project_data.get('storage_paths', [])),  # 改为 storage_paths
+            "user_id": user_id,
+            "status": "待审核"
+        }
+        
+        result = supabase.table("submitted_projects").insert(data).execute()
+        return True, result.data[0]["id"] if result.data else None
+    except Exception as e:
+        st.error(f"保存作品失败：{str(e)}")
+        return False, None
+
+def get_submitted_projects(user_id=None):
+    """获取所有提交的作品"""
+    try:
+        query = supabase.table("submitted_projects").select("*")
+        
+        if user_id:
+            query = query.eq("user_id", user_id)
+        
+        result = query.order("submit_time", desc=True).execute()
+        
+        projects = []
+        for row in result.data:
+            files = json.loads(row.get("files", "[]")) if row.get("files") else []
+            storage_paths = json.loads(row.get("storage_paths", "[]")) if row.get("storage_paths") else []
+            
+            projects.append({
+                "id": row["id"],
+                "project_name": row["project_name"],
+                "author_name": row["author_name"],
+                "project_desc": row["project_desc"],
+                "submit_time": format_beijing_time(row.get("submit_time")),
+                "files": files,
+                "storage_paths": storage_paths,  # 改为 storage_paths
+                "status": row.get("status", "待审核"),
+                "review_notes": row.get("review_notes", ""),
+                "review_time": format_beijing_time(row.get("review_time")),
+                "reviewer": row.get("reviewer", "")
+            })
+        
+        return projects
+    except Exception as e:
+        st.error(f"获取作品失败：{str(e)}")
+        return []
+
+def update_project_status(project_id, status, review_notes=""):
+    """更新作品审核状态"""
+    try:
+        data = {
+            "status": status,
+            "review_notes": review_notes,
+            "review_time": get_beijing_time().isoformat(),
+            "reviewer": st.session_state.username
+        }
+        
+        supabase.table("submitted_projects").update(data).eq("id", project_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"更新作品状态失败：{str(e)}")
+        return False
+
+def download_project_files_from_storage(project):
+    """
+    从 Supabase Storage 下载项目文件并打包成 ZIP
+    """
+    try:
+        if not project.get('storage_paths'):
+            return None
+        
+        # 创建临时目录
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = os.path.join(temp_dir, f"{project['project_name']}_files.zip")
+            
+            # 创建ZIP文件
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for i, storage_path in enumerate(project['storage_paths']):
+                    try:
+                        # 从 Supabase Storage 下载文件
+                        file_data = supabase.storage.from_("project_files").download(storage_path)
+                        
+                        # 使用原始文件名
+                        original_filename = project['files'][i] if i < len(project['files']) else f"file_{i+1}"
+                        
+                        # 写入 zip
+                        zipf.writestr(original_filename, file_data)
+                    except Exception as e:
+                        st.warning(f"文件 {original_filename} 下载失败：{str(e)}")
+            
+            # 读取ZIP文件内容
+            with open(zip_path, 'rb') as f:
+                zip_data = f.read()
+            
+            return zip_data
+    except Exception as e:
+        st.error(f"下载文件失败：{str(e)}")
+        return None
+
+def get_platform_stats():
+    """获取平台统计信息"""
+    try:
+        # 用户统计
+        users_result = supabase.table("users").select("*", count="exact").execute()
+        total_users = users_result.count if hasattr(users_result, 'count') else len(users_result.data)
+        
+        students_result = supabase.table("users").select("*", count="exact").eq("role", "student").execute()
+        student_count = students_result.count if hasattr(students_result, 'count') else len(students_result.data)
+        
+        teachers_result = supabase.table("users").select("*", count="exact").eq("role", "teacher").execute()
+        teacher_count = teachers_result.count if hasattr(teachers_result, 'count') else len(teachers_result.data)
+        
+        # 作品统计
+        projects = get_submitted_projects()
+        total_projects = len(projects)
+        pending_projects = len([p for p in projects if p['status'] == '待审核'])
+        approved_projects = len([p for p in projects if p['status'] == '已通过'])
+        rejected_projects = len([p for p in projects if p['status'] == '已拒绝'])
+        
+        # 反馈统计
+        feedback = get_feedback_data()
+        total_feedback = len(feedback)
+        
+        return {
+            'total_users': total_users,
+            'student_count': student_count,
+            'teacher_count': teacher_count,
+            'total_projects': total_projects,
+            'pending_projects': pending_projects,
+            'approved_projects': approved_projects,
+            'rejected_projects': rejected_projects,
+            'total_feedback': total_feedback
+        }
+    except Exception as e:
+        st.error(f"获取统计信息失败：{str(e)}")
+        return {
+            'total_users': 0, 'student_count': 0, 'teacher_count': 0,
+            'total_projects': 0, 'pending_projects': 0, 'approved_projects': 0,
+            'rejected_projects': 0, 'total_feedback': 0
+        }
+
+# ==================== 生成示例数据（保持不变）====================
 def generate_projects_data():
     projects = [
         {
@@ -501,16 +609,13 @@ def generate_projects_data():
     ]
     return projects
 
-# 生成统计数据
 def generate_stats_data():
     """生成用于图表的数据"""
-    # 思政元素分布数据
     ideology_data = {
         '思政元素': ['工匠精神', '家国情怀', '创新意识', '责任担当', '科学态度', '团队合作'],
         '作品数量': [35, 28, 22, 25, 20, 18]
     }
     
-    # 项目类型分布数据
     project_type_data = {
         '项目类型': ['技术创新类', '社会服务类', '文化传承类', '国家战略类'],
         '数量': [45, 30, 15, 10]
@@ -518,282 +623,144 @@ def generate_stats_data():
     
     return pd.DataFrame(ideology_data), pd.DataFrame(project_type_data)
 
-# 校验用户是否为教师角色
-def verify_teacher_role(username):
-    """校验用户是否为教师角色"""
+def export_feedback_to_csv(feedback_data):
+    """导出反馈数据到CSV"""
     try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        c.execute("SELECT role FROM users WHERE username = ?", (username,))
-        result = c.fetchone()
-        conn.close()
-        return result is not None and result[0] == "teacher"
-    except:
-        return False
-
-def get_user_id(username):
-    """获取用户ID"""
-    try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        c.execute("SELECT id FROM users WHERE username = ?", (username,))
-        result = c.fetchone()
-        conn.close()
-        return result[0] if result else None
-    except:
-        return None
-
-def get_feedback_data():
-    """从数据库读取意见反馈数据"""
-    try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
-        c.execute('''
-            SELECT id, feedback_content, submit_time, ip_address, user_agent
-            FROM feedback
-            ORDER BY submit_time DESC
-        ''')
-        
-        feedback_list = []
-        for row in c.fetchall():
-            feedback_list.append({
-                "序号": row[0],
-                "反馈内容": row[1],
-                "提交时间": format_beijing_time(row[2]),
-                "IP地址": row[3] if row[3] else "未知",
-                "用户代理": row[4] if row[4] else "未知"
-            })
-        
-        conn.close()
-        return feedback_list
-    except Exception as e:
-        st.error(f"读取反馈数据失败：{str(e)}")
-        return []
-
-def save_feedback_to_db(feedback_content):
-    """保存反馈到数据库"""
-    try:
-        import socket
-        import streamlit as st
-        
-        # 获取IP地址
-        try:
-            ip_address = st.experimental_connection("client_ip").query().to_dict()['ip_address']
-        except:
-            ip_address = "127.0.0.1"
-        
-        # 获取用户代理
-        try:
-            user_agent = st.experimental_connection("client_headers").query().to_dict().get('user-agent', '未知')
-        except:
-            user_agent = "未知"
-        
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
-        c.execute('''
-            INSERT INTO feedback (feedback_content, ip_address, user_agent)
-            VALUES (?, ?, ?)
-        ''', (feedback_content, ip_address, user_agent))
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.error(f"保存反馈失败：{str(e)}")
-        return False
-
-def save_uploaded_files(uploaded_files, project_name, author_name):
-    """保存上传的文件到服务器"""
-    try:
-        # 创建上传目录
-        upload_dir = "uploads"
-        if not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-        
-        # 创建项目目录
-        project_dir = os.path.join(upload_dir, f"{project_name}_{author_name}")
-        if not os.path.exists(project_dir):
-            os.makedirs(project_dir)
-        
-        saved_files = []
-        file_paths = []
-        
-        for uploaded_file in uploaded_files:
-            # 生成唯一文件名
-            file_ext = os.path.splitext(uploaded_file.name)[1]
-            unique_filename = f"{get_beijing_time().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
-            file_path = os.path.join(project_dir, unique_filename)
-            
-            # 保存文件
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            saved_files.append(uploaded_file.name)
-            file_paths.append(file_path)
-        
-        return saved_files, file_paths
-    except Exception as e:
-        st.error(f"保存文件失败：{str(e)}")
-        return [], []
-
-def save_submitted_project(project_data, uploaded_files=None):
-    """保存提交的作品到数据库"""
-    try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
-        # 获取用户ID
-        user_id = None
-        if "logged_in" in st.session_state and st.session_state.logged_in:
-            user_id = get_user_id(st.session_state.username)
-        
-        files_str = json.dumps(project_data.get('files', []))
-        file_paths_str = json.dumps(project_data.get('file_paths', []))
-        
-        c.execute('''
-            INSERT INTO submitted_projects (project_name, author_name, project_desc, files, file_paths, user_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (project_data['project_name'], project_data['author_name'], 
-              project_data['project_desc'], files_str, file_paths_str, user_id))
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.error(f"保存作品失败：{str(e)}")
-        return False
-
-def get_submitted_projects(user_id=None):
-    """获取所有提交的作品"""
-    try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
-        if user_id:
-            # 获取特定用户的作品
-            c.execute('''
-                SELECT id, project_name, author_name, project_desc, 
-                       submit_time, files, file_paths, status, review_notes, review_time, reviewer
-                FROM submitted_projects
-                WHERE user_id = ?
-                ORDER BY submit_time DESC
-            ''', (user_id,))
-        else:
-            # 获取所有作品
-            c.execute('''
-                SELECT id, project_name, author_name, project_desc, 
-                       submit_time, files, file_paths, status, review_notes, review_time, reviewer
-                FROM submitted_projects
-                ORDER BY submit_time DESC
-            ''')
-        
-        projects = []
-        for row in c.fetchall():
-            files = json.loads(row[5]) if row[5] else []
-            file_paths = json.loads(row[6]) if row[6] else []
-            projects.append({
-                "id": row[0],
-                "project_name": row[1],
-                "author_name": row[2],
-                "project_desc": row[3],
-                "submit_time": format_beijing_time(row[4]),
-                "files": files,
-                "file_paths": file_paths,
-                "status": row[7],
-                "review_notes": row[8],
-                "review_time": format_beijing_time(row[9]),
-                "reviewer": row[10]
-            })
-        
-        conn.close()
-        return projects
-    except Exception as e:
-        st.error(f"获取作品失败：{str(e)}")
-        return []
-
-def update_project_status(project_id, status, review_notes=""):
-    """更新作品审核状态"""
-    try:
-        conn = sqlite3.connect('image_processing_platform.db')
-        c = conn.cursor()
-        
-        c.execute('''
-            UPDATE submitted_projects 
-            SET status = ?, review_notes = ?, review_time = CURRENT_TIMESTAMP, reviewer = ?
-            WHERE id = ?
-        ''', (status, review_notes, st.session_state.username, project_id))
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.error(f"更新作品状态失败：{str(e)}")
-        return False
-
-def download_project_files(project):
-    """下载项目文件 - 增强版本，确保用户可下载自己的文件"""
-    try:
-        if not project.get('file_paths'):
+        if not feedback_data:
             return None
         
-        # 创建临时目录
-        temp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(temp_dir, f"{project['project_name']}_files.zip")
+        output = io.StringIO()
+        fieldnames = ["序号", "反馈内容", "提交时间", "IP地址", "用户代理"]
         
-        # 创建ZIP文件
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for i, file_path in enumerate(project['file_paths']):
-                if os.path.exists(file_path):
-                    # 使用原始文件名
-                    original_filename = project['files'][i] if i < len(project['files']) else f"file_{i+1}"
-                    zipf.write(file_path, original_filename)
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
         
-        # 读取ZIP文件内容
-        with open(zip_path, 'rb') as f:
-            zip_data = f.read()
+        for feedback in feedback_data:
+            writer.writerow(feedback)
         
-        # 清理临时文件
-        shutil.rmtree(temp_dir)
+        csv_str = output.getvalue()
+        output.close()
         
-        return zip_data
+        csv_bytes = csv_str.encode('gb18030', errors='ignore')
+        
+        return csv_bytes
     except Exception as e:
-        st.error(f"下载文件失败：{str(e)}")
+        st.error(f"导出CSV失败：{str(e)}")
         return None
 
+# ==================== 渲染侧边栏（保持不变）====================
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("""
+        <div style='background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; 
+            padding: 25px; border-radius: 15px; text-align: center; margin-bottom: 25px;
+            box-shadow: 0 6px 12px rgba(220, 38, 38, 0.3);'>
+            <h3>🏆 思政成果展示</h3>
+            <p style='margin: 10px 0 0 0; font-size: 1rem;'>技术报国 · 思想引领 · 创新发展</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("### 🧭 快速导航")
+        
+        if st.button("🏠 返回首页", width='content'):
+            st.switch_page("main.py")
+        if st.button("🔬 图像处理实验室", width='content'):
+            st.switch_page("pages/1_🔬_图像处理实验室.py")
+        if st.button("📝 智能与传统图片处理", use_container_width=True):
+            st.switch_page("pages/智能与传统图片处理.py")
+        if st.button("🏫 加入班级与在线签到", width='content'):
+            st.switch_page("pages/分班和在线签到.py")
+        if st.button("📤 实验作业提交", width='content'):
+            st.switch_page("pages/实验作业提交.py")            
+        if st.button("📚 学习资源中心", width='content'):
+            st.switch_page("pages/2_📚_学习资源中心.py")
+        if st.button("📝 我的思政足迹", width='content'):
+            st.switch_page("pages/3_📝_我的思政足迹.py")
+        if st.button("🏆 成果展示", width='content'):
+            st.switch_page("pages/4_🏆_成果展示.py")
+        
+        if "logged_in" in st.session_state and st.session_state.logged_in:
+            st.markdown("---")
+            if st.button("📋 我的提交记录", width='content'):
+                st.session_state.show_my_projects = True
+                st.rerun()
+        
+        if "logged_in" in st.session_state and st.session_state.logged_in:
+            if verify_teacher_role(st.session_state.username):
+                st.markdown("---")
+                if st.button("🔧 进入教师后台", width='content', type="primary"):
+                    st.session_state.show_admin = True
+                    st.rerun()
+        
+        st.markdown("### 📚 思政学习进度")
+        
+        ideology_progress = [
+            {"name": "工匠精神", "icon": "🔧", "progress": 90},
+            {"name": "家国情怀", "icon": "🇨🇳", "progress": 85},
+            {"name": "科学态度", "icon": "🔬", "progress": 78},
+            {"name": "创新意识", "icon": "💡", "progress": 82},
+            {"name": "责任担当", "icon": "⚖️", "progress": 88},
+            {"name": "团队合作", "icon": "🤝", "progress": 80}
+        ]
+        
+        for item in ideology_progress:
+            st.markdown(f"**{item['icon']} {item['name']}**")
+            st.progress(item['progress'] / 100)
+        
+        st.markdown("---")
+        
+        st.markdown("### 🎯 思政理论学习")
+        theory_topics = [
+            "新时代工匠精神的内涵与实践",
+            "科技创新与国家发展战略",
+            "社会主义核心价值观与技术伦理",
+            "科学家精神与家国情怀",
+            "数字时代的责任与担当"
+        ]
+        
+        for topic in theory_topics:
+            if st.button(f"📖 {topic}", key=f"theory_{topic}", width='content'):
+                st.info(f"开始学习：{topic}")
+        
+        st.markdown("---")
+        
+        st.markdown("### 💫 思政学习提醒")
+        st.success("""
+        🎯 **本周思政重点：**
+        - 学习科学家精神
+        - 践行工匠精神
+        - 培养家国情怀
+        - 强化责任担当
+        """)
+
+# ==================== 渲染我的提交记录 ====================
 def render_my_projects():
-    """渲染用户提交记录 - 增强下载功能"""
+    """渲染用户提交记录"""
     st.markdown("<h1 style='color:#dc2626; font-size:2rem;'>📋 我的提交记录</h1>", unsafe_allow_html=True)
     
     if "logged_in" not in st.session_state or not st.session_state.logged_in:
         st.error("🔒 请先登录查看提交记录")
         return
     
-    # 返回按钮
     if st.button("← 返回成果展示", width='content'):
         st.session_state.show_my_projects = False
         st.rerun()
     
-    # 获取用户ID
     user_id = get_user_id(st.session_state.username)
     if not user_id:
         st.error("无法获取用户信息")
         return
     
-    # 获取用户提交的作品
     my_projects = get_submitted_projects(user_id)
     
     if my_projects:
         st.markdown(f"### 📊 提交统计：共提交了 {len(my_projects)} 个作品")
         
-        # 统计不同状态的作品数量
         status_counts = {}
         for project in my_projects:
             status = project['status']
             status_counts[status] = status_counts.get(status, 0) + 1
         
-        # 显示状态统计
         cols = st.columns(3)
         status_labels = {
             "待审核": ("⏳", "orange"),
@@ -808,7 +775,6 @@ def render_my_projects():
         
         st.divider()
         
-        # 显示作品列表
         for project in my_projects:
             with st.expander(f"📄 {project['project_name']} - 提交时间：{project['submit_time']}"):
                 col1, col2 = st.columns([3, 1])
@@ -824,7 +790,6 @@ def render_my_projects():
                             st.markdown(f"- 📎 {file}")
                 
                 with col2:
-                    # 显示状态
                     status_color = ""
                     if project['status'] == "待审核":
                         status_color = "orange"
@@ -839,7 +804,6 @@ def render_my_projects():
                         st.markdown(f"**审核状态：** :{status_color}[{project['status']}]")
                         st.warning("您的作品未通过审核")
                     
-                    # 显示审核意见
                     if project['review_notes']:
                         st.markdown(f"**审核意见：**")
                         st.warning(project['review_notes'])
@@ -850,9 +814,8 @@ def render_my_projects():
                     if project['reviewer']:
                         st.markdown(f"**审核老师：** {project['reviewer']}")
                 
-                # 下载按钮 - 无论状态如何，用户都可以下载自己提交的文件
-                if project['files'] and project.get('file_paths'):
-                    zip_data = download_project_files(project)
+                if project['files'] and project.get('storage_paths'):
+                    zip_data = download_project_files_from_storage(project)
                     if zip_data:
                         st.download_button(
                             label="📥 下载我的作品文件",
@@ -866,71 +829,31 @@ def render_my_projects():
     else:
         st.info("📭 您还没有提交过作品，快去【作品征集】页面提交您的第一个作品吧！")
 
-def export_feedback_to_csv(feedback_data):
-    """导出反馈数据到CSV - 修复编码问题"""
-    try:
-        if not feedback_data:
-            return None
-        
-        # 创建StringIO对象
-        output = io.StringIO()
-        
-        # 定义CSV字段
-        fieldnames = ["序号", "反馈内容", "提交时间", "IP地址", "用户代理"]
-        
-        # 创建CSV writer，确保正确处理中文
-        writer = csv.DictWriter(output, fieldnames=fieldnames)
-        
-        # 写入表头
-        writer.writeheader()
-        
-        # 写入数据
-        for feedback in feedback_data:
-            writer.writerow(feedback)
-        
-        # 获取CSV字符串并编码为GB18030（兼容GBK和UTF-8）
-        csv_str = output.getvalue()
-        output.close()
-        
-        # 编码为GB18030，确保中文正确显示
-        csv_bytes = csv_str.encode('gb18030', errors='ignore')
-        
-        return csv_bytes
-    except Exception as e:
-        st.error(f"导出CSV失败：{str(e)}")
-        return None
-
+# ==================== 渲染管理员后台 ====================
 def render_admin_dashboard():
     """渲染管理员后台内容"""
-    # 页面标题与用户信息
     st.markdown("<h1 style='color:#dc2626; font-size:2rem;'>🔧 管理员后台</h1>", unsafe_allow_html=True)
     st.markdown(f"### 👤 当前登录教师：{st.session_state.username}")
     st.markdown("---")
     
-    # 返回普通视图按钮
     if st.button("← 返回成果展示", width='content'):
         st.session_state.show_admin = False
         st.rerun()
     
-    # 标签页布局
     admin_tabs = st.tabs(["📝 作品审核", "💬 意见反馈", "📊 平台统计"])
     
-    # 1. 作品审核标签页
     with admin_tabs[0]:
         st.markdown("<h2 style='color:#dc2626;'>📝 作品审核管理</h2>", unsafe_allow_html=True)
         
-        # 获取所有提交的作品
         submitted_projects = get_submitted_projects()
         
         if submitted_projects:
-            # 创建筛选选项
             col1, col2 = st.columns([3, 1])
             with col1:
                 search_term = st.text_input("搜索作品名称或作者", placeholder="输入关键词...")
             with col2:
                 status_filter = st.selectbox("筛选状态", ["全部", "待审核", "已通过", "已拒绝"])
             
-            # 筛选作品
             filtered_projects = submitted_projects
             if search_term:
                 filtered_projects = [
@@ -945,7 +868,6 @@ def render_admin_dashboard():
                     if p["status"] == status_filter
                 ]
             
-            # 显示统计信息
             pending_count = len([p for p in submitted_projects if p["status"] == "待审核"])
             approved_count = len([p for p in submitted_projects if p["status"] == "已通过"])
             rejected_count = len([p for p in submitted_projects if p["status"] == "已拒绝"])
@@ -960,7 +882,6 @@ def render_admin_dashboard():
             
             st.divider()
             
-            # 显示作品列表
             for project in filtered_projects:
                 with st.expander(f"📄 {project['project_name']} - {project['author_name']}"):
                     col1, col2 = st.columns([3, 1])
@@ -974,9 +895,8 @@ def render_admin_dashboard():
                             for file in project['files']:
                                 st.markdown(f"- 📎 {file}")
                             
-                            # 管理员下载按钮
-                            if project.get('file_paths'):
-                                zip_data = download_project_files(project)
+                            if project.get('storage_paths'):
+                                zip_data = download_project_files_from_storage(project)
                                 if zip_data:
                                     st.download_button(
                                         label="📥 下载作品文件",
@@ -988,7 +908,6 @@ def render_admin_dashboard():
                                     )
                     
                     with col2:
-                        # 显示状态标签
                         status_color = ""
                         if project['status'] == "待审核":
                             status_color = "orange"
@@ -1002,7 +921,6 @@ def render_admin_dashboard():
                             st.markdown(f"**审核意见：**")
                             st.warning(project['review_notes'])
                     
-                    # 审核操作
                     if project['status'] == "待审核":
                         st.markdown("---")
                         col1, col2 = st.columns(2)
@@ -1023,13 +941,11 @@ def render_admin_dashboard():
         else:
             st.info("📭 暂无学生提交的作品")
     
-    # 2. 意见反馈标签页 - 修复导出编码问题
     with admin_tabs[1]:
         st.markdown("<h2 style='color:#dc2626;'>💬 意见反馈管理</h2>", unsafe_allow_html=True)
         feedback_data = get_feedback_data()
 
         if feedback_data:
-            # 显示反馈数据表格
             feedback_df = pd.DataFrame(feedback_data)
             st.dataframe(
                 feedback_df,
@@ -1044,7 +960,6 @@ def render_admin_dashboard():
                 }
             )
 
-            # 导出反馈数据 - 使用修复的编码函数
             csv_bytes = export_feedback_to_csv(feedback_data)
             if csv_bytes:
                 st.download_button(
@@ -1055,7 +970,6 @@ def render_admin_dashboard():
                     width='content'
                 )
             
-            # 显示反馈统计
             st.divider()
             st.markdown("#### 📊 反馈统计")
             total_feedback = len(feedback_data)
@@ -1073,118 +987,87 @@ def render_admin_dashboard():
         else:
             st.info("📭 暂无用户提交的意见反馈")
     
-    # 3. 平台统计标签页
     with admin_tabs[2]:
         st.markdown("<h2 style='color:#dc2626;'>📊 平台基础统计</h2>", unsafe_allow_html=True)
         
-        try:
-            conn = sqlite3.connect('image_processing_platform.db')
-            c = conn.cursor()
+        stats = get_platform_stats()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("👥 总用户数", stats['total_users'])
+        with col2:
+            st.metric("🎓 学生用户数", stats['student_count'])
+        with col3:
+            st.metric("👨‍🏫 教师用户数", stats['teacher_count'])
+        
+        st.divider()
+        
+        st.markdown("#### 📦 作品提交统计")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("总提交作品", stats['total_projects'])
+        with col2:
+            st.metric("⏳ 待审核", stats['pending_projects'])
+        with col3:
+            st.metric("✅ 已通过", stats['approved_projects'])
+        with col4:
+            rejection_rate = (stats['rejected_projects'] / stats['total_projects'] * 100) if stats['total_projects'] > 0 else 0
+            st.metric("❌ 拒绝率", f"{rejection_rate:.1f}%")
+        
+        submitted_projects = get_submitted_projects()
+        if submitted_projects:
+            st.divider()
+            st.markdown("#### 📈 作品提交时间分布")
             
-            # 用户统计
-            c.execute("SELECT COUNT(*) FROM users")
-            total_users = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM users WHERE role = 'student'")
-            student_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM users WHERE role = 'teacher'")
-            teacher_count = c.fetchone()[0]
+            month_counts = {}
+            for project in submitted_projects:
+                if project['submit_time']:
+                    month = project['submit_time'][:7]
+                    month_counts[month] = month_counts.get(month, 0) + 1
             
-            # 作品统计
-            submitted_projects = get_submitted_projects()
-            total_projects = len(submitted_projects)
-            pending_projects = len([p for p in submitted_projects if p['status'] == '待审核'])
-            approved_projects = len([p for p in submitted_projects if p['status'] == '已通过'])
-            rejected_projects = len([p for p in submitted_projects if p['status'] == '已拒绝'])
-            
-            # 反馈统计
-            feedback_data = get_feedback_data()
-            total_feedback = len(feedback_data)
-            
-            conn.close()
+            if month_counts:
+                months = list(month_counts.keys())
+                counts = list(month_counts.values())
+                
+                timeline_df = pd.DataFrame({
+                    '月份': months,
+                    '作品数量': counts
+                }).sort_values('月份')
+                
+                fig_timeline = px.line(
+                    timeline_df,
+                    x='月份',
+                    y='作品数量',
+                    title='作品提交趋势',
+                    markers=True,
+                    line_shape='spline'
+                )
+                fig_timeline.update_traces(line_color='#dc2626', line_width=3)
+                st.plotly_chart(fig_timeline, width='stretch')
+        
+        st.divider()
+        
+        st.markdown("#### 💬 意见反馈统计")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("总反馈数量", stats['total_feedback'])
+        with col2:
+            if stats['total_feedback'] > 0:
+                feedback_data = get_feedback_data()
+                avg_feedback_len = sum(len(f['反馈内容']) for f in feedback_data) / stats['total_feedback']
+                st.metric("平均反馈长度", f"{avg_feedback_len:.0f}字")
+            else:
+                st.metric("平均反馈长度", "0字")
+        
+        st.divider()
+        st.markdown("#### 🕒 平台运行信息")
+        current_time = get_beijing_time()
+        st.markdown(f"**当前服务器时间：** {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        st.markdown(f"**时区：** 北京时间 (UTC+8)")
 
-            # 显示用户统计
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("👥 总用户数", total_users)
-            with col2:
-                st.metric("🎓 学生用户数", student_count)
-            with col3:
-                st.metric("👨‍🏫 教师用户数", teacher_count)
-            
-            st.divider()
-            
-            # 显示作品统计
-            st.markdown("#### 📦 作品提交统计")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("总提交作品", total_projects)
-            with col2:
-                st.metric("⏳ 待审核", pending_projects)
-            with col3:
-                st.metric("✅ 已通过", approved_projects)
-            with col4:
-                rejection_rate = (rejected_projects / total_projects * 100) if total_projects > 0 else 0
-                st.metric("❌ 拒绝率", f"{rejection_rate:.1f}%")
-            
-            # 作品提交时间线
-            if submitted_projects:
-                st.divider()
-                st.markdown("#### 📈 作品提交时间分布")
-                
-                # 提取月份信息
-                month_counts = {}
-                for project in submitted_projects:
-                    if project['submit_time']:
-                        month = project['submit_time'][:7]  # 取YYYY-MM
-                        month_counts[month] = month_counts.get(month, 0) + 1
-                
-                if month_counts:
-                    months = list(month_counts.keys())
-                    counts = list(month_counts.values())
-                    
-                    timeline_df = pd.DataFrame({
-                        '月份': months,
-                        '作品数量': counts
-                    }).sort_values('月份')
-                    
-                    fig_timeline = px.line(
-                        timeline_df,
-                        x='月份',
-                        y='作品数量',
-                        title='作品提交趋势',
-                        markers=True,
-                        line_shape='spline'
-                    )
-                    fig_timeline.update_traces(line_color='#dc2626', line_width=3)
-                    st.plotly_chart(fig_timeline, width='stretch')
-            
-            st.divider()
-            
-            # 显示反馈统计
-            st.markdown("#### 💬 意见反馈统计")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("总反馈数量", total_feedback)
-            with col2:
-                if total_feedback > 0:
-                    avg_feedback_len = sum(len(f['反馈内容']) for f in feedback_data) / total_feedback
-                    st.metric("平均反馈长度", f"{avg_feedback_len:.0f}字")
-                else:
-                    st.metric("平均反馈长度", "0字")
-            
-            # 显示平台运行时间
-            st.divider()
-            st.markdown("#### 🕒 平台运行信息")
-            current_time = get_beijing_time()
-            st.markdown(f"**当前服务器时间：** {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
-            st.markdown(f"**时区：** 北京时间 (UTC+8)")
-                
-        except Exception as e:
-            st.error(f"统计数据加载失败：{str(e)}")
-
+# ==================== 渲染主要内容 ====================
 def render_main_content():
     """渲染主要的成果展示内容"""
-    # 页面标题
     st.markdown("""
     <div class='modern-header'>
         <h1 class='main-title'>🏆 思政成果展示</h1>
@@ -1192,7 +1075,6 @@ def render_main_content():
     </div>
     """, unsafe_allow_html=True)
     
-    # 总体统计
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("🎯 优秀作品", "3个", "+1个")
@@ -1203,14 +1085,11 @@ def render_main_content():
     with col4:
         st.metric("🌟 思政融合", "98%", "深度融合")
     
-    # 使用标签页组织内容
     tab1, tab2, tab3, tab4 = st.tabs(["🎨 优秀作品", "📊 成果分析", "💡 作品征集", "💬 意见反馈"])
     
-    # 1. 优秀作品标签页
     with tab1:
         st.markdown("<h2 class='section-title'>🎨 优秀作品展示</h2>", unsafe_allow_html=True)
         
-        # 筛选器
         filter_col1, filter_col2 = st.columns([1, 2])
         with filter_col1:
             filter_ideology = st.multiselect(
@@ -1221,10 +1100,8 @@ def render_main_content():
         with filter_col2:
             search_term = st.text_input("搜索作品关键词", placeholder="输入作品名称、作者或技术关键词...")
         
-        # 获取并展示作品
         projects = generate_projects_data()
         
-        # 筛选作品
         filtered_projects = projects
         if filter_ideology:
             filtered_projects = [
@@ -1240,7 +1117,6 @@ def render_main_content():
                     search_term.lower() in p["tech_highlight"].lower())
             ]
         
-        # 展示作品
         if filtered_projects:
             cols = st.columns(2)
             for idx, project in enumerate(filtered_projects):
@@ -1274,14 +1150,11 @@ def render_main_content():
         else:
             st.info("🔍 没有找到符合条件的作品，请调整筛选条件")
     
-    # 2. 成果分析标签页
     with tab2:
         st.markdown("<h2 class='section-title'>📊 成果数据分析</h2>", unsafe_allow_html=True)
         
-        # 生成图表数据
         ideology_df, type_df = generate_stats_data()
         
-        # 创建两列布局
         col_a, col_b = st.columns(2)
         
         with col_a:
@@ -1305,7 +1178,6 @@ def render_main_content():
             )
             st.plotly_chart(fig2, width='stretch')
         
-        # 获奖赛事统计
         st.markdown("<h3 style='color:#dc2626; margin-top: 30px;'>🏅 代表性赛事获奖情况</h3>", unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns(3)
@@ -1338,7 +1210,6 @@ def render_main_content():
             </div>
             """, unsafe_allow_html=True)
     
-    # 3. 作品征集标签页
     with tab3:
         st.markdown("<h2 class='section-title'>💡 作品征集</h2>", unsafe_allow_html=True)
         
@@ -1375,38 +1246,45 @@ def render_main_content():
             
             if submitted:
                 if project_name and author_name and project_desc:
-                    # 保存上传的文件
-                    saved_files = []
-                    file_paths = []
-                    if uploaded_files:
-                        saved_files, file_paths = save_uploaded_files(uploaded_files, project_name, author_name)
-                    
-                    # 构建作品数据
-                    project_data = {
-                        "project_name": project_name,
-                        "author_name": author_name,
-                        "project_desc": project_desc,
-                        "files": saved_files,
-                        "file_paths": file_paths
-                    }
-                    
-                    # 保存到数据库
-                    if save_submitted_project(project_data, uploaded_files):
-                        if saved_files:
-                            st.success(f"✅ 作品提交成功！已上传 {len(saved_files)} 个文件")
-                            for file in saved_files:
-                                st.markdown(f"- 📎 {file}")
-                        else:
-                            st.success("✅ 作品提交成功！我们将尽快审核~")
-                        
-                        st.info("💡 您可以在侧边栏点击【我的提交记录】查看审核状态和下载您提交的文件")
-                        st.balloons()
+                    if "logged_in" not in st.session_state or not st.session_state.logged_in:
+                        st.error("❌ 请先登录后再提交作品")
                     else:
-                        st.error("❌ 作品提交失败，请稍后重试")
+                        user_id = get_user_id(st.session_state.username)
+                        
+                        # 保存文件到 Supabase Storage
+                        saved_files = []
+                        storage_paths = []
+                        if uploaded_files:
+                            saved_files, storage_paths = save_uploaded_files_to_storage(
+                                uploaded_files, project_name, author_name, user_id
+                            )
+                        
+                        # 构建作品数据
+                        project_data = {
+                            "project_name": project_name,
+                            "author_name": author_name,
+                            "project_desc": project_desc,
+                            "files": saved_files,
+                            "storage_paths": storage_paths
+                        }
+                        
+                        # 保存到数据库
+                        success, project_id = save_submitted_project(project_data)
+                        if success:
+                            if saved_files:
+                                st.success(f"✅ 作品提交成功！已上传 {len(saved_files)} 个文件到云端永久保存")
+                                for file in saved_files:
+                                    st.markdown(f"- 📎 {file}")
+                            else:
+                                st.success("✅ 作品提交成功！我们将尽快审核~")
+                            
+                            st.info("💡 您可以在侧边栏点击【我的提交记录】查看审核状态和下载您提交的文件")
+                            st.balloons()
+                        else:
+                            st.error("❌ 作品提交失败，请稍后重试")
                 else:
                     st.error("⚠️ 请填写作品名称、作者和描述等必填信息")
     
-    # 4. 意见反馈标签页
     with tab4:
         st.markdown("<h2 class='section-title'>💬 意见反馈</h2>", unsafe_allow_html=True)
         
@@ -1437,10 +1315,8 @@ def render_main_content():
             if st.button("🔄 清空内容", width='content'):
                 st.rerun()
 
+# ==================== 主函数 ====================
 def main():
-    # 初始化数据库
-    init_database()
-    
     # 应用CSS样式
     apply_modern_css()
     
@@ -1455,7 +1331,6 @@ def main():
     
     # 根据状态显示不同内容
     if st.session_state.show_admin:
-        # 检查是否为教师
         if "logged_in" in st.session_state and st.session_state.logged_in:
             if verify_teacher_role(st.session_state.username):
                 render_admin_dashboard()
@@ -1468,10 +1343,8 @@ def main():
             st.session_state.show_admin = False
             st.rerun()
     elif st.session_state.show_my_projects:
-        # 显示用户提交记录
         render_my_projects()
     else:
-        # 显示正常的成果展示内容
         render_main_content()
 
 if __name__ == "__main__":
