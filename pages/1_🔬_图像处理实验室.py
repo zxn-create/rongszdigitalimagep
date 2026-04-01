@@ -1727,7 +1727,51 @@ def apply_comic_effect(image, edge_threshold=50, color_style="vibrant"):
     except Exception as e:
         # 备用方案
         return image.astype(np.uint8)
+def apply_histogram_equalization_advanced(image_bgr, strength=1.0, channel_mode="所有通道", protect_brightness=True):
+    """高级直方图均衡化，支持强度和通道选择"""
+    if protect_brightness:
+        # 使用LAB色彩空间保护亮度
+        lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        l_eq = cv2.equalizeHist(l)
+        l_final = cv2.addWeighted(l, 1-strength, l_eq, strength, 0)
+        result = cv2.cvtColor(cv2.merge([l_final, a, b]), cv2.COLOR_LAB2BGR)
+    else:
+        if channel_mode == "仅亮度通道":
+            # 使用YUV色彩空间
+            yuv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2YUV)
+            y, u, v = cv2.split(yuv)
+            y_eq = cv2.equalizeHist(y)
+            y_final = cv2.addWeighted(y, 1-strength, y_eq, strength, 0)
+            result = cv2.cvtColor(cv2.merge([y_final, u, v]), cv2.COLOR_YUV2BGR)
+        else:
+            # 所有通道分别均衡化
+            b, g, r = cv2.split(image_bgr)
+            b_eq = cv2.equalizeHist(b)
+            g_eq = cv2.equalizeHist(g)
+            r_eq = cv2.equalizeHist(r)
+            b_final = cv2.addWeighted(b, 1-strength, b_eq, strength, 0)
+            g_final = cv2.addWeighted(g, 1-strength, g_eq, strength, 0)
+            r_final = cv2.addWeighted(r, 1-strength, r_eq, strength, 0)
+            result = cv2.merge([b_final, g_final, r_final])
+    return result
 
+def apply_clahe_equalization(image_bgr, clip_limit=2.0, tile_size=8, protect_brightness=True):
+    """自适应直方图均衡化"""
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile_size, tile_size))
+    
+    if protect_brightness:
+        lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        l_clahe = clahe.apply(l)
+        result = cv2.cvtColor(cv2.merge([l_clahe, a, b]), cv2.COLOR_LAB2BGR)
+    else:
+        b, g, r = cv2.split(image_bgr)
+        b_clahe = clahe.apply(b)
+        g_clahe = clahe.apply(g)
+        r_clahe = clahe.apply(r)
+        result = cv2.merge([b_clahe, g_clahe, r_clahe])
+    return result
 def apply_watercolor_effect(image, style="classic", texture_strength=0.3):
     """水彩画效果 - 简化版"""
     # 确保输入是uint8
@@ -2929,7 +2973,381 @@ def render_sidebar():
         st.text("状态: 🟢 正常运行")
         st.text("版本: v3.0.0")
         st.text(f"模块数: 13个")
+def extract_harris_corners_advanced(image_bgr, max_corners=200, quality_level=0.05, min_distance=10):
+    """优化的Harris角点检测"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    gray = np.float32(gray)
+    
+    # Harris角点检测
+    dst = cv2.cornerHarris(gray, 2, 3, 0.04)
+    dst = cv2.dilate(dst, None)
+    
+    # 非极大值抑制
+    threshold = quality_level * dst.max()
+    corner_map = (dst > threshold).astype(np.uint8)
+    
+    # 找到角点坐标
+    corners = cv2.findNonZero(corner_map)
+    if corners is not None:
+        corners = corners.squeeze()
+        # 根据响应值排序并选择top N
+        responses = [dst[y, x] for x, y in corners]
+        sorted_indices = np.argsort(responses)[::-1]
+        corners = corners[sorted_indices[:max_corners]]
+        
+        # 距离约束
+        filtered_corners = []
+        for corner in corners:
+            if all(np.linalg.norm(corner - fc) >= min_distance for fc in filtered_corners):
+                filtered_corners.append(corner)
+        corners = np.array(filtered_corners)
+    else:
+        corners = []
+    
+    # 绘制角点
+    result = image_bgr.copy()
+    feature_points = []
+    for corner in corners:
+        x, y = corner.astype(int)
+        cv2.circle(result, (x, y), 3, (0, 0, 255), -1)
+        feature_points.append((y, x))
+    
+    features = {
+        "检测到的角点数": len(corners),
+        "最大响应值": f"{dst.max():.4f}",
+        "平均响应值": f"{dst.mean():.4f}",
+        "质量阈值": f"{threshold:.4f}",
+        "角点密度": f"{len(corners) / (gray.shape[0] * gray.shape[1]) * 100000:.2f}/万像素"
+    }
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
 
+def extract_shi_tomasi_corners_advanced(image_bgr, max_corners=200, quality_level=0.05, min_distance=10):
+    """优化的Shi-Tomasi角点检测"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    
+    # Shi-Tomasi角点检测
+    corners = cv2.goodFeaturesToTrack(gray, max_corners, quality_level, min_distance)
+    
+    result = image_bgr.copy()
+    feature_points = []
+    
+    if corners is not None:
+        corners = np.int_(corners)
+        for corner in corners:
+            x, y = corner.ravel()
+            cv2.circle(result, (x, y), 3, (0, 0, 255), -1)
+            feature_points.append((y, x))
+    
+    features = {
+        "检测到的角点数": len(corners) if corners is not None else 0,
+        "质量水平": quality_level,
+        "最小距离": min_distance,
+        "最大角点数": max_corners,
+        "检测率": f"{(len(corners) if corners is not None else 0) / max_corners * 100:.1f}%"
+    }
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
+
+def extract_canny_edges_advanced(image_bgr, threshold1=50, threshold2=150, aperture_size=3):
+    """优化的Canny边缘检测"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    
+    # 高斯滤波降噪
+    gray_blur = cv2.GaussianBlur(gray, (5, 5), 1.5)
+    
+    # Canny边缘检测
+    edges = cv2.Canny(gray_blur, threshold1, threshold2, apertureSize=aperture_size)
+    
+    # 边缘细化
+    edges = cv2.ximgproc.thinning(edges) if (hasattr(cv2, 'ximgproc') and hasattr(cv2.ximgproc, 'thinning')) else edges
+    
+    # 转换为彩色显示
+    result = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+    
+    # 计算边缘特征
+    edge_ratio = np.sum(edges > 0) / edges.size
+    edge_density = edge_ratio * 100
+    
+    # 计算边缘连通域
+    num_labels, labels = cv2.connectedComponents(edges)
+    
+    features = {
+        "边缘像素比例": f"{edge_ratio:.2%}",
+        "边缘密度": f"{edge_density:.2f}%",
+        "边缘像素数": int(np.sum(edges > 0)),
+        "总像素数": edges.size,
+        "连通域数量": num_labels - 1,
+        "平均边缘长度": f"{np.sum(edges > 0) / max(1, num_labels - 1):.1f}像素"
+    }
+    
+    feature_points = np.argwhere(edges > 0).tolist()
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
+
+def extract_sobel_edges_advanced(image_bgr, ksize=3, direction="XY方向", scale=1.0):
+    """优化的Sobel边缘检测"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    
+    if direction == "X方向":
+        sobel = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=ksize, scale=scale)
+        title = "X方向边缘"
+    elif direction == "Y方向":
+        sobel = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=ksize, scale=scale)
+        title = "Y方向边缘"
+    elif direction == "梯度幅值":
+        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=ksize, scale=scale)
+        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=ksize, scale=scale)
+        sobel = np.sqrt(sobelx**2 + sobely**2)
+        title = "梯度幅值"
+    else:  # XY方向
+        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=ksize, scale=scale)
+        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=ksize, scale=scale)
+        sobel = cv2.addWeighted(cv2.convertScaleAbs(sobelx), 0.5, cv2.convertScaleAbs(sobely), 0.5, 0)
+        title = "XY方向合成"
+    
+    # 归一化到0-255
+    sobel = np.uint8(np.clip(np.abs(sobel), 0, 255))
+    result = cv2.cvtColor(sobel, cv2.COLOR_GRAY2BGR)
+    
+    # 计算梯度统计
+    gradient_magnitude = sobel.astype(np.float32)
+    
+    features = {
+        "梯度均值": f"{np.mean(gradient_magnitude):.2f}",
+        "梯度标准差": f"{np.std(gradient_magnitude):.2f}",
+        "梯度最大值": f"{np.max(gradient_magnitude):.2f}",
+        "边缘强度": f"{np.sum(gradient_magnitude > 50) / gradient_magnitude.size * 100:.2f}%",
+        "核大小": ksize,
+        "缩放因子": scale
+    }
+    
+    feature_points = np.argwhere(sobel > 50).tolist()
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
+
+def extract_lbp_texture_advanced(image_bgr, radius=1, n_points=8, method="基本LBP"):
+    """优化的LBP纹理特征提取"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0.5)
+    
+    # 使用skimage的LBP实现（如果可用）
+    try:
+        from skimage.feature import local_binary_pattern
+        if method == "旋转不变LBP":
+            lbp = local_binary_pattern(gray, n_points, radius, method='ror')
+        elif method == "均匀模式LBP":
+            lbp = local_binary_pattern(gray, n_points, radius, method='uniform')
+        else:
+            lbp = local_binary_pattern(gray, n_points, radius, method='default')
+    except:
+        # 简化的LBP实现
+        lbp = np.zeros_like(gray)
+        for i in range(radius, gray.shape[0] - radius):
+            for j in range(radius, gray.shape[1] - radius):
+                center = gray[i, j]
+                code = 0
+                for k in range(n_points):
+                    angle = 2 * np.pi * k / n_points
+                    x = j + radius * np.cos(angle)
+                    y = i - radius * np.sin(angle)
+                    if 0 <= x < gray.shape[1] and 0 <= y < gray.shape[0]:
+                        code |= ((gray[int(y), int(x)] >= center) << k)
+                lbp[i, j] = code
+    
+    # 归一化显示
+    lbp_normalized = cv2.normalize(lbp, None, 0, 255, cv2.NORM_MINMAX)
+    lbp_uint8 = np.uint8(lbp_normalized)
+    result = cv2.cvtColor(lbp_uint8, cv2.COLOR_GRAY2BGR)
+    
+    # 计算纹理直方图
+    hist, _ = np.histogram(lbp, bins=256, range=(0, 256))
+    hist = hist / hist.sum()
+    
+    # 计算纹理特征
+    uniformity = 1 - np.std(hist)
+    entropy = -np.sum(hist * np.log2(hist + 1e-10))
+    
+    features = {
+        "纹理均匀性": f"{uniformity:.4f}",
+        "纹理熵": f"{entropy:.4f}",
+        "LBP模式数": len(np.unique(lbp)),
+        "纹理复杂度": f"{np.std(lbp):.2f}",
+        "纹理均值": f"{np.mean(lbp):.2f}",
+        "半径/点数": f"{radius}/{n_points}"
+    }
+    
+    feature_points = np.argwhere(lbp > np.percentile(lbp, 90)).tolist()
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
+
+def extract_glcm_texture_advanced(image_bgr, distance=1, angle="0°", feature_name="对比度"):
+    """优化的GLCM纹理特征提取"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)  # 增强对比度
+    
+    # 量化灰度级（减少计算量）
+    gray_quantized = (gray / 16).astype(np.uint8)
+    levels = 16
+    
+    # 计算GLCM
+    glcm = np.zeros((levels, levels))
+    
+    # 根据角度设置偏移
+    if angle == "0°":
+        offset = (0, distance)
+    elif angle == "45°":
+        offset = (distance, distance)
+    elif angle == "90°":
+        offset = (distance, 0)
+    elif angle == "135°":
+        offset = (distance, -distance)
+    else:  # 所有角度
+        offsets = [(0, distance), (distance, distance), (distance, 0), (distance, -distance)]
+        glcm = np.zeros((levels, levels))
+        for offset in offsets:
+            glcm_temp = np.zeros((levels, levels))
+            for i in range(gray_quantized.shape[0] - abs(offset[0])):
+                for j in range(gray_quantized.shape[1] - abs(offset[1])):
+                    row1, col1 = i, j
+                    row2, col2 = i + offset[0], j + offset[1]
+                    if 0 <= row2 < gray_quantized.shape[0] and 0 <= col2 < gray_quantized.shape[1]:
+                        glcm_temp[gray_quantized[row1, col1], gray_quantized[row2, col2]] += 1
+            glcm += glcm_temp
+        glcm = glcm / 4  # 平均
+        glcm = glcm / glcm.sum()
+        features = calculate_glcm_features(glcm, feature_name)
+        feature_points = []
+        return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), features, feature_points
+    
+    # 计算GLCM
+    for i in range(gray_quantized.shape[0] - abs(offset[0])):
+        for j in range(gray_quantized.shape[1] - abs(offset[1])):
+            row1, col1 = i, j
+            row2, col2 = i + offset[0], j + offset[1]
+            if 0 <= row2 < gray_quantized.shape[0] and 0 <= col2 < gray_quantized.shape[1]:
+                glcm[gray_quantized[row1, col1], gray_quantized[row2, col2]] += 1
+    
+    # 归一化
+    glcm = glcm / glcm.sum()
+    
+    features = calculate_glcm_features(glcm, feature_name)
+    
+    # 可视化GLCM
+    glcm_visual = cv2.resize(glcm, (256, 256))
+    glcm_visual = np.uint8(glcm_visual * 255)
+    result = cv2.cvtColor(glcm_visual, cv2.COLOR_GRAY2BGR)
+    
+    feature_points = []
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
+
+def calculate_glcm_features(glcm, feature_name):
+    """计算GLCM特征"""
+    i, j = np.meshgrid(range(glcm.shape[0]), range(glcm.shape[1]), indexing='ij')
+    
+    if feature_name == "对比度":
+        value = np.sum(glcm * (i - j) ** 2)
+    elif feature_name == "相关性":
+        mean_i = np.sum(i * glcm)
+        mean_j = np.sum(j * glcm)
+        std_i = np.sqrt(np.sum((i - mean_i) ** 2 * glcm))
+        std_j = np.sqrt(np.sum((j - mean_j) ** 2 * glcm))
+        if std_i * std_j > 0:
+            value = np.sum((i - mean_i) * (j - mean_j) * glcm) / (std_i * std_j)
+        else:
+            value = 0
+    elif feature_name == "能量":
+        value = np.sum(glcm ** 2)
+    elif feature_name == "同质性":
+        value = np.sum(glcm / (1 + (i - j) ** 2))
+    else:  # ASM
+        value = np.sum(glcm ** 2)
+    
+    return {
+        f"GLCM {feature_name}": f"{value:.4f}",
+        "纹理能量": f"{np.sum(glcm ** 2):.4f}",
+        "纹理熵": f"{-np.sum(glcm * np.log2(glcm + 1e-10)):.4f}",
+        "纹理对比度": f"{np.sum(glcm * (i - j) ** 2):.4f}"
+    }
+
+def extract_sift_features_advanced(image_bgr, nfeatures=0, nOctaveLayers=3, contrastThreshold=0.04):
+    """SIFT特征提取"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    
+    # 创建SIFT检测器
+    sift = cv2.SIFT_create(nfeatures=nfeatures, nOctaveLayers=nOctaveLayers, 
+                           contrastThreshold=contrastThreshold)
+    
+    # 检测关键点和描述子
+    keypoints, descriptors = sift.detectAndCompute(gray, None)
+    
+    # 绘制关键点
+    result = cv2.drawKeypoints(image_bgr, keypoints, None, 
+                               flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    
+    # 统计特征
+    feature_points = [(int(kp.pt[1]), int(kp.pt[0])) for kp in keypoints]
+    
+    # 计算关键点大小和响应的统计
+    if keypoints:
+        sizes = [kp.size for kp in keypoints]
+        responses = [kp.response for kp in keypoints]
+        
+        features = {
+            "检测到的特征点": len(keypoints),
+            "平均尺度": f"{np.mean(sizes):.2f}",
+            "平均响应": f"{np.mean(responses):.2f}",
+            "最大响应": f"{np.max(responses):.2f}",
+            "描述子维度": descriptors.shape[1] if descriptors is not None else 0,
+            "八度层数": nOctaveLayers
+        }
+    else:
+        features = {
+            "检测到的特征点": 0,
+            "描述子维度": 0,
+            "八度层数": nOctaveLayers
+        }
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
+
+def extract_orb_features_advanced(image_bgr, nfeatures=500, scaleFactor=1.2, nlevels=8):
+    """ORB特征提取"""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    
+    # 创建ORB检测器
+    orb = cv2.ORB_create(nfeatures=nfeatures, scaleFactor=scaleFactor, nlevels=nlevels)
+    
+    # 检测关键点和描述子
+    keypoints, descriptors = orb.detectAndCompute(gray, None)
+    
+    # 绘制关键点
+    result = cv2.drawKeypoints(image_bgr, keypoints, None, 
+                               flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    
+    # 统计特征
+    feature_points = [(int(kp.pt[1]), int(kp.pt[0])) for kp in keypoints]
+    
+    if keypoints:
+        sizes = [kp.size for kp in keypoints]
+        angles = [kp.angle for kp in keypoints]
+        
+        features = {
+            "检测到的特征点": len(keypoints),
+            "平均尺度": f"{np.mean(sizes):.2f}",
+            "平均角度": f"{np.mean(angles):.1f}°" if angles else "N/A",
+            "特征点密度": f"{len(keypoints) / (gray.shape[0] * gray.shape[1]) * 100000:.2f}/万像素",
+            "描述子维度": descriptors.shape[1] if descriptors is not None else 0,
+            "金字塔层数": nlevels
+        }
+    else:
+        features = {
+            "检测到的特征点": 0,
+            "描述子维度": 0,
+            "金字塔层数": nlevels
+        }
+    
+    return cv2.cvtColor(result, cv2.COLOR_BGR2RGB), features, feature_points
 # ======================= 主界面 =======================
 # 实验室头部
 st.markdown("""
@@ -2956,7 +3374,8 @@ tab_names = [
     "🎨 图像绘画",
     "🌟 风格迁移",
     "🖼️ 老照片上色",
-    "⚙️ 数字形态学"
+    "⚙️ 数字形态学",
+    "🔍 图像特征提取"
 ]
 
 tabs = st.tabs(tab_names)
@@ -2997,40 +3416,99 @@ def load_and_display_image(uploaded_file, tab_key):
 
 # 1. 图像增强选项卡
 with tabs[0]:
-    st.markdown("### 🔬 图像增强处理")
-    
+    # ==================== 实验任务导入模块 ====================
     st.markdown("""
-    <div class='ideology-card'>
-        <h4>🎯 思政关联：精益求精的工匠精神</h4>
-        <p>
-        图像增强技术体现了<strong style='color: #dc2626;'>精益求精</strong>的工匠精神，
-        通过不断优化细节，追求更高质量的图像效果，这正体现了社会主义核心价值观中的<strong style='color: #dc2626;'>敬业</strong>精神。
-        在技术学习中，我们要发扬这种一丝不苟、追求卓越的精神品质。
-        </p>
+    <div style='background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; padding: 20px; border-radius: 15px; margin-bottom: 25px; text-align: center;'>
+        <h2 style='margin: 0;'>📋 实验1：图像增强技术实践</h2>
+        <p style='margin: 10px 0 0 0; opacity: 0.9;'>掌握图像增强核心技术 · 培养精益求精的工匠精神</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # ===== 双列布局：左侧上传，右侧素材库 =====
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握直方图均衡化、对比度调整、伽马校正等图像增强方法</li>
+                    <li>理解不同增强算法对图像质量的影响机理</li>
+                    <li>培养精益求精的工匠精神和实事求是的科学态度</li>
+                    <li>能够根据图像特点自主选择合适的增强方法</li>
+                    <li>学会通过直方图分析图像增强效果</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要处理的图像（支持JPG、PNG等格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>选择增强方法（直方图均衡化/对比度调整/伽马校正/CLAHE）</li>
+                    <li>调整参数观察效果变化，记录最佳参数</li>
+                    <li>对比处理前后的图像和直方图分布</li>
+                    <li>下载处理结果并撰写实验心得</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>直方图均衡化：适用于整体曝光不足的图像</li>
+                    <li>伽马校正：γ>1图像变暗，γ<1图像变亮</li>
+                    <li>CLAHE：可避免局部过曝，适合医学影像</li>
+                    <li>建议多次尝试不同方法，对比效果差异</li>
+                    <li>观察直方图变化，理解增强原理</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    
+    # ===== 实验操作区 =====
+    st.markdown("### 🔬 图像增强实验操作")
+    
+    # 双列布局：左侧上传，右侧素材库
     col_upload1, col_upload2 = st.columns(2)
     
     uploaded_file = None
     
     with col_upload1:
+        st.markdown("""
+        <div style='background: #fafaf9; padding: 15px; border-radius: 12px; margin-bottom: 15px;'>
+            <h4 style='margin-top: 0;'>📤 上传图像</h4>
+            <p style='font-size: 0.9rem; color: #666;'>支持格式：JPG, JPEG, PNG, BMP, WEBP</p>
+        </div>
+        """, unsafe_allow_html=True)
         uploaded_file = st.file_uploader(
-            "📤 上传图像文件", 
+            "选择图像文件", 
             type=["jpg", "jpeg", "png", "bmp", "webp"], 
-            key="tab1_upload"
+            key="tab1_upload",
+            label_visibility="collapsed"
         )
     
     with col_upload2:
+        st.markdown("""
+        <div style='background: #fafaf9; padding: 15px; border-radius: 12px; margin-bottom: 15px;'>
+            <h4 style='margin-top: 0;'>📚 素材库选择</h4>
+            <p style='font-size: 0.9rem; color: #666;'>从内置素材库中选择示例图像</p>
+        </div>
+        """, unsafe_allow_html=True)
         # 素材库选择
         example_files = get_example_images()
         
         if example_files:
             selected_example = st.selectbox(
-                "📚 从素材库选择",
+                "选择素材",
                 ["-- 请选择素材 --"] + example_files,
-                key="tab1_example"
+                key="tab1_example",
+                label_visibility="collapsed"
             )
             
             if selected_example != "-- 请选择素材 --":
@@ -3047,94 +3525,279 @@ with tabs[0]:
         # 转换为BGR用于OpenCV处理
         image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
         
+        # 显示图像信息
+        st.markdown("---")
+        col_info1, col_info2, col_info3, col_info4 = st.columns(4)
+        with col_info1:
+            st.metric("图像宽度", f"{image_rgb.shape[1]}px")
+        with col_info2:
+            st.metric("图像高度", f"{image_rgb.shape[0]}px")
+        with col_info3:
+            st.metric("颜色通道", "RGB" if len(image_rgb.shape) == 3 else "灰度")
+        with col_info4:
+            st.metric("文件类型", uploaded_file.name.split('.')[-1].upper())
+        
         # 初始化结果变量
         result_rgb = None
         
+        # 原始图像显示
         col1, col2 = st.columns([2, 1])
         with col1:
             st.markdown('<div class="image-container">', unsafe_allow_html=True)
-            # 显示RGB版本（正确的颜色）
             st.image(image_rgb, caption="原始图像", use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
+        
+        # 增强方法选择区域
+        st.markdown("### ⚙️ 增强参数设置")
         
         # 增强方法选择
         enhancement_method = st.selectbox(
             "选择增强方法",
-            ["直方图均衡化", "对比度调整", "伽马校正", "CLAHE增强"]
+            ["直方图均衡化", "对比度调整", "伽马校正", "CLAHE增强"],
+            help="不同方法适用于不同类型的图像增强需求"
         )
         
-        col1, col2 = st.columns(2)
-        with col1:
+        # 参数设置和效果预览
+        col_params, col_preview = st.columns([1, 1])
+        
+        with col_params:
+            st.markdown("#### 🔧 参数调节")
+            
             if enhancement_method == "对比度调整":
-                alpha = st.slider("对比度系数", 0.5, 3.0, 1.2, 0.1)
-                beta = st.slider("亮度调整", -50, 50, 0)
-                if st.button("应用对比度调整", use_container_width=True):
-                    # 使用BGR版本进行处理
-                    result_bgr = apply_contrast_adjustment(image_bgr, alpha, beta)
-                    # 转换为RGB用于显示
-                    result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+                alpha = st.slider("对比度系数", 0.5, 3.0, 1.2, 0.1, 
+                                 help="值越大对比度越强，>1增强对比度，<1降低对比度")
+                beta = st.slider("亮度调整", -50, 50, 0,
+                                help="正值增加亮度，负值降低亮度")
+                
+                if st.button("✅ 应用对比度调整", use_container_width=True, key="btn_contrast"):
+                    with st.spinner("正在处理中..."):
+                        result_bgr = apply_contrast_adjustment(image_bgr, alpha, beta)
+                        result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+                    st.success("✅ 处理完成！")
                     
             elif enhancement_method == "伽马校正":
-                gamma = st.slider("伽马值", 0.1, 3.0, 1.0, 0.1)
-                if st.button("应用伽马校正", use_container_width=True):
-                    # 使用BGR版本进行处理
-                    result_bgr = apply_gamma_correction(image_bgr, gamma)
-                    # 转换为RGB用于显示
-                    result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+                gamma = st.slider("伽马值", 0.1, 3.0, 1.0, 0.1,
+                                 help="γ<1图像变亮，γ>1图像变暗，γ=1无变化")
+                
+                if st.button("✅ 应用伽马校正", use_container_width=True, key="btn_gamma"):
+                    with st.spinner("正在处理中..."):
+                        result_bgr = apply_gamma_correction(image_bgr, gamma)
+                        result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+                    st.success("✅ 处理完成！")
                     
             elif enhancement_method == "CLAHE增强":
-                clip_limit = st.slider("对比度限制", 1.0, 4.0, 2.0, 0.1)
-                tile_size = st.slider("网格大小", 4, 16, 8, 2)
-                if st.button("应用CLAHE增强", use_container_width=True):
-                    # 使用BGR版本进行处理
-                    result_bgr = apply_clahe(image_bgr, clip_limit, (tile_size, tile_size))
-                    # 转换为RGB用于显示
-                    result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
-                    
+                clip_limit = st.slider("对比度限制", 1.0, 4.0, 2.0, 0.1,
+                                      help="限制对比度放大的程度，值越大对比度越强")
+                tile_size = st.slider("网格大小", 4, 16, 8, 2,
+                                     help="将图像分割的网格大小，影响局部均衡化效果")
+                
+                if st.button("✅ 应用CLAHE增强", use_container_width=True, key="btn_clahe"):
+                    with st.spinner("正在处理中..."):
+                        result_bgr = apply_clahe(image_bgr, clip_limit, (tile_size, tile_size))
+                        result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+                    st.success("✅ 处理完成！")
+
+
+
             else:  # 直方图均衡化
-                if st.button("应用直方图均衡化", use_container_width=True):
-                    # 使用BGR版本进行处理
-                    result_bgr = apply_histogram_equalization(image_bgr)
-                    # 转换为RGB用于显示
-                    result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
-        
-        with col2:
+                st.info("直方图均衡化调整图像对比度")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    eq_type = st.selectbox("均衡化类型", ["标准全局均衡化", "自适应直方图均衡化 (CLAHE)"], key="hist_eq_type")
+                    protect_brightness = st.checkbox("保护原图亮度", value=True, key="protect_brightness")
+                
+                with col2:
+                    if eq_type == "自适应直方图均衡化 (CLAHE)":
+                        clip_limit = st.slider("对比度限制", 1.0, 30.0, 2.0, 0.5, key="clip_limit")
+                        tile_size = st.slider("网格大小", 4, 16, 8, 1, key="tile_size")
+                    else:
+                        strength = st.slider("均衡化强度", 0.0, 10.0, 1.0, 0.05, key="eq_strength")
+                        channel_mode = st.selectbox("应用通道", ["所有通道", "仅亮度通道"], key="channel_mode")
+                
+                if st.button("✅ 应用直方图均衡化", use_container_width=True, key="btn_histeq"):
+                    with st.spinner("正在处理中..."):
+                        if eq_type == "自适应直方图均衡化 (CLAHE)":
+                            result_bgr = apply_clahe_equalization(image_bgr, clip_limit, tile_size, protect_brightness)
+                        else:
+                            result_bgr = apply_histogram_equalization_advanced(image_bgr, strength, channel_mode, protect_brightness)
+                        result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+                    st.success("✅ 处理完成！")        
+        with col_preview:
             if result_rgb is not None:
+                st.markdown("#### 📷 处理结果预览")
                 st.markdown('<div class="image-container">', unsafe_allow_html=True)
                 st.image(result_rgb, caption=f"{enhancement_method}结果", use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
-                
-                # 显示对比和直方图
-                display_comparison_with_histograms(
-                    image_rgb, 
-                    result_rgb, 
-                    original_title="原始图像", 
-                    processed_title=f"{enhancement_method}结果"
-                )
-                
-                # 下载时使用RGB版本
+        
+        # 效果对比分析
+        if result_rgb is not None:
+            st.markdown("---")
+            st.markdown("### 📊 效果对比分析")
+            
+            # 显示对比和直方图
+            display_comparison_with_histograms(
+                image_rgb, 
+                result_rgb, 
+                original_title="原始图像", 
+                processed_title=f"{enhancement_method}结果"
+            )
+            
+            # 下载结果
+            st.markdown("### 📥 下载处理结果")
+            col_dl1, col_dl2, col_dl3 = st.columns(3)
+            
+            with col_dl1:
                 provide_download_button(
                     result_rgb, 
                     f"enhanced_{enhancement_method}.jpg", 
-                    "📥 下载增强结果",
-                    unique_key_suffix="tab1_enhance"
+                    "💾 下载JPEG格式",
+                    unique_key_suffix="tab1_jpeg"
+                )
+            
+            with col_dl2:
+                # PNG格式下载
+                png_buffer = io.BytesIO()
+                result_pil = Image.fromarray(result_rgb)
+                result_pil.save(png_buffer, format="PNG")
+                png_buffer.seek(0)
+                st.download_button(
+                    label="🖼️ 下载PNG格式",
+                    data=png_buffer,
+                    file_name=f"enhanced_{enhancement_method}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                    key="tab1_png"
+                )
+            
+            with col_dl3:
+                # 高质量版本
+                high_buffer = io.BytesIO()
+                result_pil.save(high_buffer, format="JPEG", quality=100)
+                high_buffer.seek(0)
+                st.download_button(
+                    label="🌟 最高质量",
+                    data=high_buffer,
+                    file_name=f"enhanced_{enhancement_method}_高质量.jpg",
+                    mime="image/jpeg",
+                    use_container_width=True,
+                    key="tab1_high"
                 )
     else:
-        st.info("📤 请上传图像文件或从素材库选择图片开始处理")
-# 2. 边缘检测选项卡
-with tabs[1]:
-    st.markdown("### 📐 边缘检测算法比较")
+        # 未上传文件时的引导提示
+        st.info("📤 请上传图像文件或从素材库选择图片开始实验")
+        
+        # 示例效果展示
+        with st.expander("📚 查看示例效果展示", expanded=False):
+            st.markdown("""
+            <div style='text-align: center; padding: 20px;'>
+                <h4>图像增强效果示例</h4>
+                <p>以下展示不同增强方法的效果对比：</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 创建示例对比表格
+            demo_col1, demo_col2 = st.columns(2)
+            with demo_col1:
+                st.markdown("**原始图像（曝光不足）**")
+                demo_original = np.ones((200, 200, 3), dtype=np.uint8) * 80
+                st.image(demo_original, use_container_width=True, clamp=True)
+                st.caption("曝光不足，细节难以辨认")
+            
+            with demo_col2:
+                st.markdown("**直方图均衡化后**")
+                demo_enhanced = cv2.equalizeHist(demo_original[:,:,0])
+                demo_enhanced = cv2.cvtColor(demo_enhanced, cv2.COLOR_GRAY2RGB)
+                st.image(demo_enhanced, use_container_width=True, clamp=True)
+                st.caption("对比度提升，细节清晰可见")
+            
+            st.markdown("---")
+            st.markdown("""
+            <div style='background: #f0fdf4; padding: 15px; border-radius: 10px;'>
+                <h5 style='color: #22c55e; margin-top: 0;'>✨ 实验建议</h5>
+                <ul>
+                    <li>建议选择曝光不足或对比度较低的图像进行实验</li>
+                    <li>尝试不同方法处理同一张图像，对比效果差异</li>
+                    <li>观察直方图变化，理解增强原理</li>
+                    <li>记录最佳参数组合，形成实验经验</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
     
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🔬 图像增强的应用场景：</strong></p>
+        <ul>
+            <li><strong>医学影像处理：</strong>增强X光片、CT图像的细节，辅助医生诊断</li>
+            <li><strong>安防监控：</strong>提升夜间或低光照监控图像的清晰度</li>
+            <li><strong>遥感图像：</strong>增强卫星图像的地物特征，便于地物识别</li>
+            <li><strong>摄影后期：</strong>调整照片的对比度和亮度，提升视觉效果</li>
+        </ul>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“精益求精，追求卓越” — 图像处理中的工匠精神体现</p>
+    </div>
+    """, unsafe_allow_html=True)
+        # 思政关联卡片
     st.markdown("""
     <div class='ideology-card'>
-        <h4>🎯 思政关联：严谨的科学态度</h4>
+        <h4>🎯 思政关联：精益求精的工匠精神</h4>
         <p>
-        边缘检测算法体现了<strong style='color: #dc2626;'>严谨求实</strong>的科学态度，
-        不同算法各有优劣，需要根据实际需求选择，这体现了<strong style='color: #dc2626;'>实事求是</strong>的科学精神。
-        在技术研究中，我们要保持严谨的态度，追求真理。
+        图像增强技术体现了<strong style='color: #dc2626;'>精益求精</strong>的工匠精神，
+        通过不断优化细节，追求更高质量的图像效果，这正体现了社会主义核心价值观中的<strong style='color: #dc2626;'>敬业</strong>精神。
+        在技术学习中，我们要发扬这种一丝不苟、追求卓越的精神品质。
         </p>
     </div>
     """, unsafe_allow_html=True)
+# 2. 边缘检测选项卡
+with tabs[1]:
+    st.markdown("### 📐 边缘检测算法比较")
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握Canny、Sobel、Laplacian等经典边缘检测算法</li>
+                    <li>理解不同算子对图像边缘特征的提取原理与差异</li>
+                    <li>培养严谨求实的科学态度与精益求精的工匠精神</li>
+                    <li>能够根据图像特征自主选择最优边缘检测方法</li>
+                    <li>学会通过视觉效果评价算法性能优劣</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+    
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要处理的图像（支持JPG、PNG等格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>分别使用Canny、Sobel、Laplacian进行边缘检测</li>
+                    <li>调整对应参数观察边缘提取效果</li>
+                    <li>对比三种算法的检测结果与优缺点</li>
+                    <li>下载处理结果并完成实验分析总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+    
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>Canny：双阈值控制，抗干扰强，适合精准边缘提取</li>
+                    <li>Sobel：核越大边缘越粗，适合强边缘检测</li>
+                    <li>Laplacian：二阶微分，对噪声敏感，适合细节边缘</li>
+                    <li>建议多组参数对比，观察算法差异</li>
+                    <li>优先选择边缘连续、伪边缘少的算法与参数</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
     
     # ===== 双列布局：左侧上传，右侧素材库 =====
     col_upload1, col_upload2 = st.columns(2)
@@ -3296,21 +3959,83 @@ with tabs[1]:
         st.image(image_rgb, caption="原始图像", use_container_width=True)
     else:
         st.info("📤 请上传图像文件或从素材库选择图片开始处理")
-
-# 3. 线性变换选项卡
-with tabs[2]:
-    st.markdown("### 🔄 线性变换处理")
-    
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🔍 边缘检测的应用场景：</strong></p>
+        <ul>
+            <li><strong>医学影像分析：</strong>提取病灶、器官轮廓边缘，辅助医生精准定位与诊断</li>
+            <li><strong>工业质检：</strong>检测产品裂纹、缺口、边缘瑕疵，实现自动化质量检测</li>
+            <li><strong>目标识别：</strong>作为特征提取基础步骤，用于人脸识别、车辆检测、物体追踪</li>
+            <li><strong>图像分割：</strong>通过边缘信息划分不同区域，是图像理解的核心基础</li>
+            <li><strong>遥感测绘：</strong>提取道路、建筑、地形轮廓，用于地图绘制与地理监测</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>Canny、Sobel、Laplacian 是最经典的边缘检测算法，分别基于一阶、二阶微分实现，
+        实际应用中需根据图像噪声、精度需求<strong>实事求是、择优选择</strong>。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“精益求精，严谨求实” — 边缘检测中科学态度与工匠精神的体现</p>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown("""
     <div class='ideology-card'>
-        <h4>🎯 思政关联：创新发展的思维</h4>
+        <h4>🎯 思政关联：严谨的科学态度</h4>
         <p>
-        线性变换技术体现了<strong style='color: #dc2626;'>创新求变</strong>的思维模式，
-        通过数学变换创造新的视角，这体现了<strong style='color: #dc2626;'>改革创新</strong>的时代精神。
-        在技术发展中，我们要勇于创新，不断探索。
+        边缘检测算法体现了<strong style='color: #dc2626;'>严谨求实</strong>的科学态度，
+        不同算法各有优劣，需要根据实际需求选择，这体现了<strong style='color: #dc2626;'>实事求是</strong>的科学精神。
+        在技术研究中，我们要保持严谨的态度，追求真理。
         </p>
     </div>
     """, unsafe_allow_html=True)
+# 3. 线性变换选项卡
+with tabs[2]:
+    st.markdown("### 🔄 线性变换处理")
+        # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握图像仿射变换、透视变换等线性变换方法</li>
+                    <li>理解旋转、平移、缩放、透视校正的数学原理</li>
+                    <li>培养严谨的逻辑思维与创新实践的科学态度</li>
+                    <li>能够根据场景需求选择合适的线性变换方式</li>
+                    <li>学会通过变换矩阵分析图像变换效果</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要处理的图像（支持JPG、PNG等格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>选择变换类型（仿射变换/透视变换）</li>
+                    <li>调整参数观察变换效果，记录最佳参数</li>
+                    <li>对比处理前后的图像与变换矩阵</li>
+                    <li>下载处理结果并撰写实验心得</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>仿射变换：支持旋转、平移、缩放，保持直线平行性</li>
+                    <li>透视变换：可校正倾斜视角，适合文档矫正</li>
+                    <li>变换矩阵直观反映图像的坐标映射关系</li>
+                    <li>建议多次调整参数，对比不同变换效果</li>
+                    <li>观察图像变化，理解线性变换原理</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
     
     # ===== 双列布局：左侧上传，右侧素材库 =====
     col_upload1, col_upload2 = st.columns(2)
@@ -3514,22 +4239,93 @@ with tabs[2]:
     else:
         st.info("📤 请上传图像文件或从素材库选择图片开始处理")
 
-
-
-# 4. 图像锐化选项卡
-with tabs[3]:
-    st.markdown("### ✨ 图像锐化处理")
-    
     st.markdown("""
     <div class='ideology-card'>
-        <h4>🎯 思政关联：精益求精的态度</h4>
+        <h4>🎯 思政关联：创新发展的思维</h4>
         <p>
-        图像锐化技术体现了<strong style='color: #dc2626;'>精益求精</strong>的工作态度，
-        通过增强细节展现更清晰的图像，这体现了<strong style='color: #dc2626;'>追求卓越</strong>的工匠精神。
-        在技术工作中，我们要注重细节，追求完美。
+        线性变换技术体现了<strong style='color: #dc2626;'>创新求变</strong>的思维模式，
+        通过数学变换创造新的视角，这体现了<strong style='color: #dc2626;'>改革创新</strong>的时代精神。
+        在技术发展中，我们要勇于创新，不断探索。
         </p>
     </div>
     """, unsafe_allow_html=True)
+# 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🔄 图像线性变换的应用场景：</strong></p>
+        <ul>
+            <li><strong>文档矫正与扫描：</strong>使用透视变换校正倾斜拍摄的文档、证件、试卷，还原标准视角</li>
+            <li><strong>图像拼接与配准：</strong>通过仿射变换实现图像平移、旋转、缩放，完成多图拼接与地图配准</li>
+            <li><strong>视觉监控校正：</strong>消除摄像头拍摄畸变，将斜拍画面转换为俯视/正视标准图像</li>
+            <li><strong>AR/VR 视觉呈现：</strong>通过坐标变换实现虚拟物体与真实场景的精准匹配</li>
+            <li><strong>工业视觉定位：</strong>对产品、零件进行角度校正，实现自动化精准检测与定位</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>仿射变换保持直线与平行关系，适合常规几何调整；透视变换可实现视角转换，适合倾斜校正。
+        变换矩阵是数字图像处理与计算机视觉的数学基础，体现了<strong>数学驱动技术</strong>的核心思想。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“创新求变，严谨务实” — 线性变换中的科技思维与工程素养体现</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：创新发展的思维</h4>
+        <p>
+        线性变换技术体现了<strong style='color: #dc2626;'>创新求变</strong>的思维模式，
+        通过数学变换创造新的视角，这体现了<strong style='color: #dc2626;'>改革创新</strong>的时代精神。
+        在技术发展中，我们要勇于创新，不断探索。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+# 4. 图像锐化选项卡
+with tabs[3]:
+    st.markdown("### ✨ 图像锐化处理")
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握锐化滤波、非锐化掩蔽、拉普拉斯锐化等方法</li>
+                    <li>理解图像高频细节增强与边缘提取的原理</li>
+                    <li>培养精益求精、追求卓越的工匠精神</li>
+                    <li>能够根据图像模糊程度选择合适锐化方法</li>
+                    <li>学会对比分析灰度/彩色图像的锐化效果差异</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要处理的图像（支持JPG、PNG等格式）</li>
+                    <li>选择灰度锐化或彩色锐化模式</li>
+                    <li>选择锐化方法并调整参数观察效果</li>
+                    <li>对比处理前后图像细节与边缘清晰度</li>
+                    <li>记录最佳参数与最优锐化效果</li>
+                    <li>下载结果并完成实验总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>灰度锐化：计算更快、无色彩干扰，适合文档处理</li>
+                    <li>非锐化掩蔽：效果自然，是最常用的清晰化方法</li>
+                    <li>拉普拉斯锐化：边缘增强明显，适合弱边缘图像</li>
+                    <li>强度不宜过大，避免出现噪点与伪影</li>
+                    <li>优先选择细节清晰、无失真的参数组合</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
+
     
     # 添加锐化原理说明
     with st.expander("📚 锐化原理说明", expanded=False):
@@ -3881,23 +4677,84 @@ with tabs[3]:
                 demo_sharp_bgr = apply_unsharp_masking(demo_blurred_bgr, 2.0, 1.5)
                 demo_sharp_gray = cv2.cvtColor(demo_sharp_bgr, cv2.COLOR_BGR2GRAY)
                 st.image(demo_sharp_gray, caption="锐化后的灰度图像", use_container_width=True, clamp=True)
-
-
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>✨ 图像锐化的应用场景：</strong></p>
+        <ul>
+            <li><strong>医学影像增强：</strong>强化CT、X光、病理切片的边缘与纹理，帮助医生识别细微病灶</li>
+            <li><strong>文档与证件处理：</strong>提升模糊扫描件、身份证、试卷的文字清晰度，便于识别与存档</li>
+            <li><strong>摄影与影视后期：</strong>增强人像、风景照片细节，让画面更锐利、质感更突出</li>
+            <li><strong>安防监控复原：</strong>对低清、模糊监控画面进行细节增强，提升目标辨识度</li>
+            <li><strong>工业视觉检测：</strong>强化零件边缘、裂纹、瑕疵轮廓，实现自动化高精度质检</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>图像锐化通过增强高频分量突出边缘与细节，灰度锐化运算更快、无色彩干扰；
+        非锐化掩蔽效果最自然，拉普拉斯锐化边缘增强最显著，实际应用需<strong>适度处理、避免噪点失真</strong>。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“精益求精，追求卓越” — 图像锐化中的工匠精神与细节品质</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：精益求精的态度</h4>
+        <p>
+        图像锐化技术体现了<strong style='color: #dc2626;'>精益求精</strong>的工作态度，
+        通过增强细节展现更清晰的图像，这体现了<strong style='color: #dc2626;'>追求卓越</strong>的工匠精神。
+        在技术工作中，我们要注重细节，追求完美。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
 # 5. 采样与量化选项卡
 with tabs[4]:
     st.markdown("### 📊 采样与量化分析")
-    
-    st.markdown("""
-    <div class='ideology-card'>
-        <h4>🎯 思政关联：实事求是的科学精神</h4>
-        <p>
-        采样与量化技术体现了<strong style='color: #dc2626;'>实事求是</strong>的科学精神，
-        通过分析数据特征优化存储和传输，这体现了<strong style='color: #dc2626;'>务实高效</strong>的工作作风。
-        在技术应用中，我们要注重实际效果，追求效率。
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+        # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握图像采样与量化的基本原理与实现方法</li>
+                    <li>理解采样比例、量化级别对图像质量的影响规律</li>
+                    <li>培养求真务实、严谨细致的科学探究精神</li>
+                    <li>能够分析不同参数下图像的失真程度与细节损失</li>
+                    <li>学会平衡图像质量与数据量的优化方案</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要处理的图像（支持JPG、PNG等格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>调整采样比例，观察图像分辨率变化</li>
+                    <li>调整量化级别，观察图像灰度层次变化</li>
+                    <li>对比处理前后的图像效果与直方图分布</li>
+                    <li>下载处理结果并完成实验分析与总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>采样：比例越大，图像尺寸越小，细节丢失越明显</li>
+                    <li>量化：级别越小，灰度层次越少，色块失真越严重</li>
+                    <li>直方图可直观反映采样量化后的像素分布变化</li>
+                    <li>建议逐步调整参数，对比观察图像失真规律</li>
+                    <li>理解数字图像从模拟到数字的转换核心原理</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
     
     # ===== 双列布局：左侧上传，右侧素材库 =====
     col_upload1, col_upload2 = st.columns(2)
@@ -3997,21 +4854,82 @@ with tabs[4]:
             )
     else:
         st.info("📤 请上传图像文件或从素材库选择图片开始处理")
-
-# 6. 彩色图像分割选项卡
-with tabs[5]:
-    st.markdown("### 🎨 彩色图像分割")
-    
     st.markdown("""
     <div class='ideology-card'>
-        <h4>🎯 思政关联：精准分析的能力</h4>
+        <h4>🎯 思政关联：实事求是的科学精神</h4>
         <p>
-        彩色图像分割技术体现了<strong style='color: #dc2626;'>精准分析</strong>的能力，
-        通过颜色特征识别不同区域，这体现了<strong style='color: #dc2626;'>科学分析</strong>的工作方法。
-        在技术应用中，我们要培养精准分析的能力。
+        采样与量化技术体现了<strong style='color: #dc2626;'>实事求是</strong>的科学精神，
+        通过分析数据特征优化存储和传输，这体现了<strong style='color: #dc2626;'>务实高效</strong>的工作作风。
+        在技术应用中，我们要注重实际效果，追求效率。
         </p>
     </div>
     """, unsafe_allow_html=True)
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>📊 图像采样与量化的应用场景：</strong></p>
+        <ul>
+            <li><strong>图像压缩存储：</strong>通过降低采样率与量化级数，减小文件体积，提升存储与传输效率</li>
+            <li><strong>多媒体通信：</strong>网络带宽有限时，平衡画质与流畅度，实现视频、图片快速传输</li>
+            <li><strong>嵌入式设备：</strong>低性能硬件上优化显示效果，适配屏幕分辨率与灰度等级</li>
+            <li><strong>数字媒体标准化：</strong>JPEG、BMP等格式的核心基础，决定图像清晰度与文件大小</li>
+            <li><strong>科学实验成像：</strong>控制采集精度，平衡数据量与细节，适用于医学、遥感、监控成像</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>采样决定空间分辨率，比例越大图像越模糊；量化决定灰度层次，级别越少色块越明显。
+        二者是模拟图像数字化的核心步骤，体现<strong>精度与效率</strong>的平衡思想。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“求真务实，高效务实” — 采样量化中的科学精神与工程素养</p>
+    </div>
+    """, unsafe_allow_html=True)
+# 6. 彩色图像分割选项卡
+with tabs[5]:
+    st.markdown("### 🎨 彩色图像分割")
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握RGB与HSV颜色空间的图像分割方法</li>
+                    <li>理解颜色特征提取与目标区域分割的原理</li>
+                    <li>培养精准分析、科学识别的图像处理思维</li>
+                    <li>能够通过阈值范围实现目标颜色的提取</li>
+                    <li>学会对比两种颜色空间的分割效果与适用场景</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传彩色图像（支持JPG、PNG等格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>选择颜色空间：RGB / HSV</li>
+                    <li>调整颜色分量阈值范围</li>
+                    <li>执行颜色分割并对比处理效果</li>
+                    <li>下载分割结果并完成实验心得</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>RGB分割：直接调整红、绿、蓝通道范围</li>
+                    <li>HSV分割：不受光照影响，分割更稳定准确</li>
+                    <li>最小值与最大值决定目标颜色提取范围</li>
+                    <li>HSV适合复杂光照，RGB适合简单场景</li>
+                    <li>多次微调阈值可获得最佳分割效果</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
     
     # ===== 双列布局：左侧上传，右侧素材库 =====
     col_upload1, col_upload2 = st.columns(2)
@@ -4115,20 +5033,84 @@ with tabs[5]:
             )
     else:
         st.info("📤 请上传图像文件或从素材库选择图片开始处理")
-# 7. 颜色通道分析选项卡
-with tabs[6]:
-    st.markdown("### 🌈 颜色通道分析")
-    
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🎨 彩色图像分割的应用场景：</strong></p>
+        <ul>
+            <li><strong>目标检测与追踪：</strong>根据颜色特征识别车辆、行人、标志物，广泛用于安防与自动驾驶</li>
+            <li><strong>医学影像分析：</strong>分割组织、病灶、血管区域，辅助医生精准诊断</li>
+            <li><strong>农业遥感监测：</strong>识别作物、土壤、病虫害区域，实现精准农业管理</li>
+            <li><strong>工业质检分拣：</strong>根据颜色区分产品、零件、瑕疵，实现自动化分拣检测</li>
+            <li><strong>图像智能抠图：</strong>分离前景与背景，用于证件照、特效制作、图像编辑</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>RGB空间计算简单但受光照影响大；HSV空间更符合人眼视觉，抗干扰强、分割稳定。
+        颜色分割是计算机视觉的基础技术，体现<strong>精准识别、科学分析</strong>的核心思想。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“精准分析，科学识别” — 彩色图像分割中的工程素养与科学精神</p>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown("""
     <div class='ideology-card'>
-        <h4>🎯 思政关联：系统分析思维</h4>
+        <h4>🎯 思政关联：精准分析的能力</h4>
         <p>
-        颜色通道分析体现了<strong style='color: #dc2626;'>系统分析</strong>的思维方式，
-        通过分解和重组理解图像结构，这体现了<strong style='color: #dc2626;'>全面分析</strong>的科学方法。
-        在技术学习中，我们要培养系统思维。
+        彩色图像分割技术体现了<strong style='color: #dc2626;'>精准分析</strong>的能力，
+        通过颜色特征识别不同区域，这体现了<strong style='color: #dc2626;'>科学分析</strong>的工作方法。
+        在技术应用中，我们要培养精准分析的能力。
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+# 7. 颜色通道分析选项卡
+with tabs[6]:
+    st.markdown("### 🌈 颜色通道分析")
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握彩色图像分割与RGB/HSV通道分析方法</li>
+                    <li>理解颜色空间特征与通道分离的核心原理</li>
+                    <li>培养精准分析、系统探究的科学思维</li>
+                    <li>能够使用颜色特征实现目标区域提取与分割</li>
+                    <li>学会通道调整、重组对图像色彩的影响规律</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传彩色图像（支持JPG、PNG等格式）</li>
+                    <li>选择颜色空间实现目标区域分割</li>
+                    <li>分离RGB三通道，观察单通道特征</li>
+                    <li>调整指定通道数值，观察色彩变化</li>
+                    <li>对比原始图像与处理后效果差异</li>
+                    <li>下载结果并完成实验分析总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>RGB分割：直接调整红绿蓝范围，适合简单场景</li>
+                    <li>HSV分割：不受光照影响，分割效果更稳定</li>
+                    <li>通道分离：可单独观察R/G/B分量的图像特征</li>
+                    <li>通道调整：可实现图像色彩增强与校正</li>
+                    <li>直方图可直观反映颜色与通道分布变化</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
+
     
     # ===== 双列布局：左侧上传，右侧素材库 =====
     col_upload1, col_upload2 = st.columns(2)
@@ -4260,21 +5242,83 @@ with tabs[6]:
             )
     else:
         st.info("📤 请上传图像文件或从素材库选择图片开始处理")
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🌈 颜色通道分析的应用场景：</strong></p>
+        <ul>
+            <li><strong>图像色彩校正：</strong>单独调整红/绿/蓝通道，修复白平衡、色偏、过饱和问题</li>
+            <li><strong>医学影像处理：</strong>通过通道增强突出血管、细胞、病灶等细微结构</li>
+            <li><strong>图像增强与特效：</strong>强化指定色彩，实现风格化调色、冷暖色调调整</li>
+            <li><strong>目标识别与分割：</strong>利用单通道特征提升颜色分割、目标检测的准确率</li>
+            <li><strong>图像压缩与传输：</strong>分离通道实现高效编码，降低存储与传输成本</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>RGB通道是数字色彩的基础，每个通道独立记录亮度信息；
+        通道分离可观察色彩分布规律，通道调整可精准控制色彩表现，是彩色图像处理的核心基础。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“分解探究，系统分析” — 颜色通道中的科学思维与工程素养</p>
+    </div>
+    """, unsafe_allow_html=True) 
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：系统分析思维</h4>
+        <p>
+        颜色通道分析体现了<strong style='color: #dc2626;'>系统分析</strong>的思维方式，
+        通过分解和重组理解图像结构，这体现了<strong style='color: #dc2626;'>全面分析</strong>的科学方法。
+        在技术学习中，我们要培养系统思维。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
 # 8. 特效处理选项卡
 with tabs[7]:
     st.markdown("### 🎭 特效处理")
-    
-    st.markdown("""
-    <div class='ideology-card'>
-        <h4>🎯 思政关联：创新实践能力</h4>
-        <p>
-        特效处理技术体现了<strong style='color: #dc2626;'>创新实践</strong>的能力，
-        通过创造性思维实现视觉效果，这体现了<strong style='color: #dc2626;'>勇于创新</strong>的精神。
-        在技术应用中，我们要敢于创新，勇于实践。
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握雨点、雪花、樱花、星空等图像特效实现方法</li>
+                    <li>理解特效生成与图像叠加的核心原理</li>
+                    <li>培养创新实践、勇于探索的创作精神</li>
+                    <li>能够调整参数实现不同风格的视觉效果</li>
+                    <li>学会特效强度、透明度的优化与搭配</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要处理的图像（支持JPG、PNG等格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>选择特效类型（雨点/雪花/樱花/星空）</li>
+                    <li>调整密度、透明度等参数观察效果变化</li>
+                    <li>对比原始图像与特效处理后的效果</li>
+                    <li>下载结果并完成实验心得与创作总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>雨点特效：模拟真实雨滴，密度越大雨势越大</li>
+                    <li>雪花特效：生成动态飘落雪花，透明度可调节</li>
+                    <li>樱花特效：添加浪漫花瓣飘落效果</li>
+                    <li>星空特效：生成闪烁星光，营造梦幻氛围</li>
+                    <li>参数适中效果最佳，避免过度叠加失真</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
     
     # ===== 双列布局：左侧上传，右侧素材库 =====
     col_upload1, col_upload2 = st.columns(2)
@@ -4385,23 +5429,84 @@ with tabs[7]:
             )
     else:
         st.info("📤 请上传图像文件或从素材库选择图片开始处理")
-                
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🎭 图像特效处理的应用场景：</strong></p>
+        <ul>
+            <li><strong>影视动画制作：</strong>实现雨雪、烟雾、星光等自然特效，提升画面氛围感与视觉冲击力</li>
+            <li><strong>短视频与摄影后期：</strong>快速添加滤镜、氛围特效，美化照片、增强艺术表现力</li>
+            <li><strong>游戏视觉渲染：</strong>生成天气、粒子、光影特效，构建沉浸式游戏画面</li>
+            <li><strong>广告创意设计：</strong>制作动态视觉效果，增强宣传物料的吸引力与艺术感</li>
+            <li><strong>虚拟场景仿真：</strong>模拟自然环境与天气变化，用于教学、训练、虚拟展示</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>图像特效基于像素叠加、随机生成、透明度混合实现，
+        通过参数控制密度、大小、透明度，是计算机图形学与数字媒体创作的重要技术。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“勇于创新，实践探索” — 特效处理中的创新精神与工程创作素养</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：创新实践能力</h4>
+        <p>
+        特效处理技术体现了<strong style='color: #dc2626;'>创新实践</strong>的能力，
+        通过创造性思维实现视觉效果，这体现了<strong style='color: #dc2626;'>勇于创新</strong>的精神。
+        在技术应用中，我们要敢于创新，勇于实践。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)                
                 
 
 # 9. 图像绘画选项卡
 with tabs[8]:
     st.markdown("### 🎨 图像绘画风格转换")
-    
-    st.markdown("""
-    <div class='ideology-card'>
-        <h4>🎯 思政关联：艺术与科技融合</h4>
-        <p>
-        图像绘画技术体现了<strong style='color: #dc2626;'>艺术与科技</strong>的融合，
-        通过技术手段实现艺术效果，这体现了<strong style='color: #dc2626;'>创新融合</strong>的发展理念。
-        在技术发展中，我们要注重多学科融合，推动<strong style='color: #dc2626;'>文化创新</strong>和<strong style='color: #dc2626;'>科技进步</strong>。
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握油画、素描、水墨、漫画等绘画风格转换方法</li>
+                    <li>理解艺术风格与数字图像处理的融合原理</li>
+                    <li>培养科技与艺术融合的创新创作思维</li>
+                    <li>能够调整参数生成高质量艺术绘画效果</li>
+                    <li>学会对比分析不同艺术风格的视觉表现特点</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要转换的图像（支持JPG、PNG等格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>选择绘画风格并调整对应效果参数</li>
+                    <li>生成艺术绘画效果并观察视觉变化</li>
+                    <li>对比原始图像与艺术风格处理结果</li>
+                    <li>下载艺术作品并完成创作心得总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>油画效果：调整笔触半径与强度，模拟质感</li>
+                    <li>铅笔素描：支持优雅/艺术风格，生成黑白线条</li>
+                    <li>水墨画：调节墨迹浓度，呈现中式水墨意境</li>
+                    <li>漫画风格：可调整轮廓粗细与色彩鲜艳度</li>
+                    <li>参数适中效果最佳，可多次尝试获得理想作品</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
     
     # ===== 双列布局：左侧上传，右侧素材库 =====
     col_upload1, col_upload2 = st.columns(2)
@@ -4627,24 +5732,84 @@ with tabs[8]:
     else:
         # 没有上传文件时的界面
         st.info("📤 请上传图像文件或从素材库选择图片开始处理")
-
-
-
-# 底部思政总结
-st.markdown("---")# 10. 风格迁移选项卡
-with tabs[9]:
-    st.markdown("### 🌟 风格迁移与艺术化")
-    
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🎨 图像绘画风格转换的应用场景：</strong></p>
+        <ul>
+            <li><strong>数字艺术创作：</strong>将摄影作品快速转换为油画、水彩、水墨等艺术形式，拓展创作边界</li>
+            <li><strong>影视海报设计：</strong>生成风格化剧照，营造电影氛围感，用于宣传物料制作</li>
+            <li><strong>文化遗产数字化：</strong>将传统书画风格应用于现代影像，实现传统文化与现代技术的融合</li>
+            <li><strong>社交与电商美化：</strong>制作个性化头像、商品展示图，提升视觉吸引力与传播效果</li>
+            <li><strong>教育与展示展览：</strong>将实景照片转换为艺术风格，用于科普课件、艺术展览互动体验</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>图像绘画风格转换基于<strong>边缘检测、纹理映射、色彩量化</strong>等技术，
+        通过算法模拟不同画派的笔触、质感与色彩特征，是计算机视觉与艺术创作的交叉领域，体现了<strong>科技赋能艺术、艺术丰富科技</strong>的融合理念。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“科技赋能，艺术创新” — 图像绘画中的科技与文化融合素养</p>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown("""
     <div class='ideology-card'>
-        <h4>🎯 思政关联：文化传承与创新</h4>
+        <h4>🎯 思政关联：艺术与科技融合</h4>
         <p>
-        风格迁移技术体现了<strong style='color: #dc2626;'>文化传承与创新</strong>，
-        通过现代技术重现经典艺术风格，这体现了<strong style='color: #dc2626;'>文化自信</strong>。
-        在技术应用中，我们要注重文化传承。
+        图像绘画技术体现了<strong style='color: #dc2626;'>艺术与科技</strong>的融合，
+        通过技术手段实现艺术效果，这体现了<strong style='color: #dc2626;'>创新融合</strong>的发展理念。
+        在技术发展中，我们要注重多学科融合，推动<strong style='color: #dc2626;'>文化创新</strong>和<strong style='color: #dc2626;'>科技进步</strong>。
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+st.markdown("---")# 10. 风格迁移选项卡
+with tabs[9]:
+    st.markdown("### 🌟 风格迁移与艺术化")
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握梵高、莫奈、毕加索等经典艺术风格迁移方法</li>
+                    <li>理解图像内容与艺术风格分离重组的核心原理</li>
+                    <li>培养文化传承、科技与艺术融合的创新理念</li>
+                    <li>能够调整参数实现高质量艺术化风格转换</li>
+                    <li>学会对比分析不同艺术流派的视觉风格特点</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传需要风格转换的图像（支持JPG、PNG格式）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>选择艺术风格类型并调整对应效果参数</li>
+                    <li>生成艺术化作品并观察风格呈现效果</li>
+                    <li>对比原始图像与风格迁移后的艺术效果</li>
+                    <li>下载高质量艺术作品并完成实验总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>梵高风格：旋转笔触+浓烈色彩，表现力强</li>
+                    <li>星空风格：梦幻蓝色+星光效果，氛围感拉满</li>
+                    <li>莫奈印象派：柔和笔触+朦胧光影，清新自然</li>
+                    <li>毕加索立体主义：几何分割+色块简化，抽象艺术</li>
+                    <li>动漫风格：清晰轮廓+平涂色彩，二次元效果</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
+
     
     # 双列布局：左侧上传，右侧素材库
     col_upload1, col_upload2 = st.columns(2)
@@ -4860,21 +6025,83 @@ with tabs[9]:
                 )
     else:
         st.info("📤 请上传图像文件或从素材库选择开始艺术创作")
-        
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🌟 风格迁移与艺术化的应用场景：</strong></p>
+        <ul>
+            <li><strong>数字艺术创作：</strong>将普通照片转换为梵高、莫奈等大师风格，实现低门槛艺术创作</li>
+            <li><strong>文化遗产保护：</strong>利用AI复原、重现经典画作，助力传统艺术数字化传承与传播</li>
+            <li><strong>影视动漫制作：</strong>快速生成风格化场景、角色，提升视觉效果与制作效率</li>
+            <li><strong>文创产品设计：</strong>制作个性化艺术海报、周边产品，推动文化创意产业发展</li>
+            <li><strong>艺术教育普及：</strong>直观展示不同画派风格特点，降低艺术欣赏与学习门槛</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>风格迁移基于深度学习与图像处理技术，实现图像“内容”与“风格”分离重组，
+        将经典艺术流派的笔触、色彩、构图特征迁移到现代图像中，是<strong>科技与艺术、传统与现代</strong>深度融合的典型应用。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“传承经典，创新表达” — 风格迁移中的文化自信与科技美育</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：文化传承与创新</h4>
+        <p>
+        风格迁移技术体现了<strong style='color: #dc2626;'>文化传承与创新</strong>，
+        通过现代技术重现经典艺术风格，这体现了<strong style='color: #dc2626;'>文化自信</strong>。
+        在技术应用中，我们要注重文化传承。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)       
 # 11. 老照片上色选项卡
 with tabs[10]:
     st.markdown("### 🖼️ 老照片上色与修复")
-    
-    st.markdown("""
-    <div class='ideology-card'>
-        <h4>🎯 思政关联：历史传承与记忆</h4>
-        <p>
-        老照片上色技术体现了<strong style='color: #dc2626;'>历史传承</strong>的意义，
-        通过技术手段重现历史色彩，这体现了<strong style='color: #dc2626;'>记忆传承</strong>的价值。
-        在技术应用中，我们要尊重历史，传承文化。
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握老照片智能上色、色彩增强与修复方法</li>
+                    <li>理解黑白图像彩色化的原理与色彩空间转换</li>
+                    <li>培养尊重历史、传承记忆的文化保护意识</li>
+                    <li>能够使用多模式上色还原历史影像真实色彩</li>
+                    <li>学会亮度、饱和度、降噪等参数综合优化</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传黑白照片或老旧图像（支持JPG、PNG）</li>
+                    <li>系统自动检测图像类型并分析色彩差异</li>
+                    <li>选择上色模式并调整饱和度、亮度等参数</li>
+                    <li>启用智能识别完成老照片自动上色</li>
+                    <li>对比原始照片与上色修复后的效果</li>
+                    <li>下载高质量成果并完成实验心得总结</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>智能上色：自动识别区域，还原真实自然色彩</li>
+                    <li>复古色调：添加怀旧棕褐色调，还原年代质感</li>
+                    <li>色彩强度：控制上色浓度，数值越大色彩越浓</li>
+                    <li>降噪强度：去除老照片噪点，提升画面清晰度</li>
+                    <li>彩色照片可强制转黑白后再上色，效果更佳</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
+
     
     # 双列布局：左侧上传，右侧素材库
     col_upload1, col_upload2 = st.columns(2)
@@ -5187,11 +6414,81 @@ with tabs[10]:
     else:
         # 没有上传文件时的界面
         st.info("📤 请上传黑白或老旧照片或从素材库选择开始上色")
-
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🖼️ 老照片上色与修复的应用场景：</strong></p>
+        <ul>
+            <li><strong>历史影像数字化：</strong>为博物馆、档案馆的老旧黑白照片、纪实影像上色修复，还原历史场景原貌，助力文化遗产数字化留存与传播。</li>
+            <li><strong>家族记忆传承：</strong>修复翻新家族老照片，修复破损、褪色、噪点等问题，还原人物与场景的真实色彩，留住家族温情与时代印记。</li>
+            <li><strong>影视与文创创作：</strong>为纪录片、怀旧题材影视、复古文创产品提供高清彩色素材，还原年代质感，增强作品的历史代入感。</li>
+            <li><strong>影像档案修复：</strong>修复历史人物照片、老建筑影像、民俗纪实资料，弥补历史影像的色彩空白，为历史研究提供更直观的参考。</li>
+            <li><strong>个人影像翻新：</strong>修复个人留存的老旧照片，去除划痕、模糊、褪色等瑕疵，让珍贵回忆以更清晰、鲜活的方式呈现。</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>老照片上色基于LAB/RGB色彩空间转换、像素智能识别与区域分类渲染技术，结合AI算法识别图像中的人物、景物区域，匹配符合历史场景的真实色彩；修复功能则通过降噪、划痕去除、亮度对比度优化，还原老照片的原始质感，是<strong>科技赋能文化传承</strong>的典型应用。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“以技传史，以色留忆” — 老照片修复中的历史敬畏与文化传承素养</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：历史传承与记忆</h4>
+        <p>
+        老照片上色技术体现了<strong style='color: #dc2626;'>历史传承</strong>的意义，
+        通过技术手段重现历史色彩，这体现了<strong style='color: #dc2626;'>记忆传承</strong>的价值。
+        在技术应用中，我们要尊重历史，传承文化。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 # 12. 数字形态学选项卡
 with tabs[11]:
     st.markdown("### ⚙️ 数字形态学转换")
-    
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握腐蚀、膨胀、开运算、闭运算形态学处理方法</li>
+                    <li>理解结构元素与形态学操作的工作原理</li>
+                    <li>培养结构化、系统化的图像分析思维</li>
+                    <li>能够使用形态学操作实现图像去噪、轮廓提取</li>
+                    <li>学会选择合适参数完成二值图像优化处理</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传图像文件（推荐使用二值图像）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>自动转换为二值图像后进行形态学处理</li>
+                    <li>选择操作类型并调整结构元素核大小</li>
+                    <li>对比原始图像与处理后的结构变化</li>
+                    <li>下载结果并完成实验分析与心得</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>腐蚀：缩小目标区域，去除细小噪点</li>
+                    <li>膨胀：扩大目标区域，填充内部孔洞</li>
+                    <li>开运算：先腐蚀后膨胀，平滑边界并去噪</li>
+                    <li>闭运算：先膨胀后腐蚀，填充孔洞连接间隙</li>
+                    <li>核越大，形态学操作的变化效果越明显</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
     st.markdown("""
     <div class='ideology-card'>
         <h4>🎯 思政关联：结构化思维</h4>
@@ -5280,21 +6577,401 @@ with tabs[11]:
         provide_download_button(result_rgb, f"morphology_{operation}.jpg", "📥 下载结果")
     else:
         st.info("请上传图像文件或从素材库选择开始处理")
-st.markdown("""
-<div class='ideology-card'>
-    <h3>🌟 思政学习总结</h3>
-    <p style='text-align: center; font-size: 1.1rem;'>
-    通过13个图像处理模块的学习与实践，我们不仅掌握了先进技术，更重要的是培养了
-    <strong style='color: #dc2626;'>工匠精神、科学态度、创新意识、责任担当、系统思维、文化传承</strong>
-    等综合素质。将个人成长与国家发展紧密结合，为实现科技强国目标贡献力量。
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>⚙️ 数字形态学处理的应用场景：</strong></p>
+        <ul>
+            <li><strong>图像去噪预处理：</strong>利用开运算去除背景中的细小噪点，利用闭运算填充目标内部孔洞，为后续特征提取扫清障碍。</li>
+            <li><strong>目标区域分割与连接：</strong>通过膨胀连接断裂的目标边缘，通过腐蚀分离粘连的物体，实现图像中目标物体的精准分割。</li>
+            <li><strong>文字识别与文档处理：</strong>在OCR识别中，通过形态学操作校正手写体/印刷体的笔画断裂、墨迹污染，提升识别准确率。</li>
+            <li><strong>工业质检与物体计数：</strong>对工业零件的二值图像进行形态学处理，修复瑕疵并统计物体数量，实现自动化检测。</li>
+            <li><strong>医学影像分析：</strong>分割细胞、血管等组织结构，去除背景杂讯，辅助医生进行病理诊断与图像量化分析。</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>数字形态学基于<strong>集合论</strong>与<strong>拓扑学</strong>，以<strong>结构元素</strong>（核）为探针，通过卷积操作探索图像的几何结构。
+        <ul>
+            <li><strong>腐蚀</strong>：局部最小值滤波，“吃”掉边界像素，用于去除小噪点。</li>
+            <li><strong>膨胀</strong>：局部最大值滤波，“喂”大边界像素，用于填充孔洞。</li>
+            <li><strong>开运算</strong>：先腐蚀后膨胀，<strong>去噪保形</strong>，平滑物体边界。</li>
+            <li><strong>闭运算</strong>：先膨胀后腐蚀，<strong>填孔连缝</strong>，巩固物体内部。</li>
+        </ul>
+        是计算机视觉中分析图像几何结构的基础核心技术。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“以形塑理，结构之美” — 数字形态学中的结构化分析与系统工程素养</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：结构化思维</h4>
+        <p>
+        数字形态学技术体现了<strong style='color: #dc2626;'>结构化</strong>思维，
+        通过数学形态处理图像结构，这体现了<strong style='color: #dc2626;'>系统化</strong>的工作方法。
+        在技术学习中，我们要培养结构化思维。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+# 13. 特征提取选项卡
+with tabs[12]:
+    st.markdown("### 🔍 图像特征提取")
+    # 实验说明卡片
+    with st.expander("📖 实验说明", expanded=True):
+        col_desc1, col_desc2, col_desc3 = st.columns(3)
+        with col_desc1:
+            st.markdown("""
+            <div style='background: #fef2f2; padding: 15px; border-radius: 10px; border-left: 4px solid #dc2626; height: 100%;'>
+                <h4 style='color: #dc2626; margin-top: 0;'>🎯 实验目标</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>掌握图像特征提取的基本原理和方法</li>
+                    <li>理解角点、边缘、纹理等特征的提取算法</li>
+                    <li>培养从图像中提取关键信息的能力</li>
+                    <li>能够选择合适的特征提取方法解决实际问题</li>
+                    <li>学会评估不同特征提取算法的效果</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc2:
+            st.markdown("""
+            <div style='background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6; height: 100%;'>
+                <h4 style='color: #3b82f6; margin-top: 0;'>📝 实验步骤</h4>
+                <ol style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>上传图像文件（支持彩色或灰度图像）</li>
+                    <li>从素材库选择或上传自己的图像文件</li>
+                    <li>选择特征提取类型（角点/边缘/纹理/高级特征）</li>
+                    <li>调整特征提取算法的相关参数</li>
+                    <li>对比原图与特征提取结果</li>
+                    <li>下载结果并完成实验分析与心得</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_desc3:
+            st.markdown("""
+            <div style='background: #fef9e3; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b; height: 100%;'>
+                <h4 style='color: #f59e0b; margin-top: 0;'>💡 操作提示</h4>
+                <ul style='margin-bottom: 0; padding-left: 20px;'>
+                    <li>角点检测：Harris、Shi-Tomasi算法，用于图像匹配</li>
+                    <li>边缘检测：Canny、Sobel算法，用于轮廓提取</li>
+                    <li>纹理分析：LBP、GLCM算法，用于材质分类</li>
+                    <li>高级特征：SIFT、ORB具有尺度和旋转不变性</li>
+                    <li>参数调整直接影响特征提取的灵敏度和准确性</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)    
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：特征思维与精准识别</h4>
+        <p>
+        特征提取技术体现了<strong style='color: #dc2626;'>去伪存真、抓住本质</strong>的思维方式，
+        从复杂图像中提取关键特征，这反映了<strong style='color: #dc2626;'>精准识别</strong>的科学方法。
+        在技术学习中，我们要培养抓住主要矛盾的思维能力。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 双列布局：左侧上传，右侧素材库
+    col_upload1, col_upload2 = st.columns(2)
+    
+    uploaded_file = None
+    
+    with col_upload1:
+        uploaded_file = st.file_uploader(
+            "📤 上传图像文件", 
+            type=["jpg", "jpeg", "png"], 
+            key="feature_upload"
+        )
+    
+    with col_upload2:
+        # 素材库选择
+        example_files = get_example_images()
+        
+        if example_files:
+            selected_example = st.selectbox(
+                "📚 从素材库选择",
+                ["-- 请选择素材 --"] + example_files,
+                key="feature_example"
+            )
+            
+            if selected_example != "-- 请选择素材 --":
+                uploaded_file = load_example_image(selected_example)
+                st.success(f"✅ 已选择素材: {selected_example}")
+        else:
+            st.info("📁 素材库为空，请添加图片到examples文件夹")
+    
+    if uploaded_file is not None:
+        # 读取图像
+        pil_image = Image.open(uploaded_file)
+        # 保存RGB版本用于显示
+        image_rgb = np.array(pil_image)
+        
+        # 转换为BGR用于OpenCV处理
+        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+        
+        # 特征提取类型选择
+        feature_type = st.selectbox("选择特征提取类型", 
+                                   ["角点检测 (Harris)", "角点检测 (Shi-Tomasi)", 
+                                    "边缘检测 (Canny)", "边缘检测 (Sobel)", 
+                                    "纹理分析 (LBP)", "纹理分析 (GLCM)",
+                                    "高级特征 (SIFT)", "高级特征 (ORB)"])
+        
+        # 根据不同类型显示不同参数
+        col_params1, col_params2, col_params3 = st.columns(3)
+        
+        # 初始化参数变量
+        max_corners = quality_level = min_distance = None
+        threshold1 = threshold2 = None
+        ksize = direction = None
+        radius = n_points = None
+        glcm_method = None
+        nfeatures = nOctaveLayers = None
+        
+        if "角点检测 (Harris)" in feature_type:
+            with col_params1:
+                max_corners = st.slider("最大角点数", 50, 1000, 200, 50, key="max_corners_harris")
+            with col_params2:
+                quality_level = st.slider("质量水平", 0.01, 0.5, 0.05, 0.01, key="quality_harris")
+            with col_params3:
+                min_distance = st.slider("最小距离", 5, 100, 10, 5, key="min_dist_harris")
+                
+        elif "角点检测 (Shi-Tomasi)" in feature_type:
+            with col_params1:
+                max_corners = st.slider("最大角点数", 50, 1000, 200, 50, key="max_corners_shi")
+            with col_params2:
+                quality_level = st.slider("质量水平", 0.01, 0.5, 0.05, 0.01, key="quality_shi")
+            with col_params3:
+                min_distance = st.slider("最小距离", 5, 100, 10, 5, key="min_dist_shi")
+                
+        elif "边缘检测 (Canny)" in feature_type:
+            with col_params1:
+                threshold1 = st.slider("低阈值", 0, 255, 50, key="canny_low")
+            with col_params2:
+                threshold2 = st.slider("高阈值", 0, 255, 150, key="canny_high")
+            with col_params3:
+                aperture_size = st.selectbox("Sobel算子大小", [3, 5, 7], key="aperture_size")
+                
+        elif "边缘检测 (Sobel)" in feature_type:
+            with col_params1:
+                ksize = st.selectbox("核大小", [3, 5, 7], key="sobel_ksize")
+            with col_params2:
+                direction = st.selectbox("方向", ["X方向", "Y方向", "XY方向", "梯度幅值"], key="sobel_dir")
+            with col_params3:
+                scale = st.slider("缩放因子", 0.5, 2.0, 1.0, 0.1, key="sobel_scale")
+                
+        elif "纹理分析 (LBP)" in feature_type:
+            with col_params1:
+                radius = st.slider("LBP半径", 1, 5, 1, key="lbp_radius")
+            with col_params2:
+                n_points = st.slider("采样点数", 8, 24, 8, step=4, key="lbp_points")
+            with col_params3:
+                method = st.selectbox("LBP模式", ["基本LBP", "旋转不变LBP", "均匀模式LBP"], key="lbp_method")
+                
+        elif "纹理分析 (GLCM)" in feature_type:
+            with col_params1:
+                distances = st.slider("像素距离", 1, 10, 1, key="glcm_dist")
+            with col_params2:
+                angles = st.selectbox("角度", ["0°", "45°", "90°", "135°", "所有角度"], key="glcm_angle")
+            with col_params3:
+                glcm_method = st.selectbox("纹理特征", ["对比度", "相关性", "能量", "同质性", "ASM"], key="glcm_feature")
+                
+        elif "高级特征 (SIFT)" in feature_type:
+            with col_params1:
+                nfeatures = st.slider("特征点数量", 0, 1000, 0, key="sift_nfeatures")
+            with col_params2:
+                nOctaveLayers = st.slider("八度层数", 1, 8, 3, key="sift_octave")
+            with col_params3:
+                contrastThreshold = st.slider("对比度阈值", 0.01, 0.1, 0.04, 0.01, key="sift_contrast")
+                
+        else:  # ORB
+            with col_params1:
+                nfeatures = st.slider("特征点数量", 50, 2000, 500, key="orb_nfeatures")
+            with col_params2:
+                scaleFactor = st.slider("尺度因子", 1.1, 2.0, 1.2, 0.05, key="orb_scale")
+            with col_params3:
+                nlevels = st.slider("金字塔层数", 1, 12, 8, key="orb_levels")
+        
+        # 执行特征提取
+        if st.button("🔍 提取特征", width='stretch', key="btn_feature"):
+            with st.spinner("正在提取特征..."):
+                if "角点检测 (Harris)" in feature_type:
+                    result_rgb, features, feature_points = extract_harris_corners_advanced(
+                        image_bgr, max_corners, quality_level, min_distance
+                    )
+                elif "角点检测 (Shi-Tomasi)" in feature_type:
+                    result_rgb, features, feature_points = extract_shi_tomasi_corners_advanced(
+                        image_bgr, max_corners, quality_level, min_distance
+                    )
+                elif "边缘检测 (Canny)" in feature_type:
+                    result_rgb, features, feature_points = extract_canny_edges_advanced(
+                        image_bgr, threshold1, threshold2, aperture_size
+                    )
+                elif "边缘检测 (Sobel)" in feature_type:
+                    result_rgb, features, feature_points = extract_sobel_edges_advanced(
+                        image_bgr, ksize, direction, scale
+                    )
+                elif "纹理分析 (LBP)" in feature_type:
+                    result_rgb, features, feature_points = extract_lbp_texture_advanced(
+                        image_bgr, radius, n_points, method
+                    )
+                elif "纹理分析 (GLCM)" in feature_type:
+                    result_rgb, features, feature_points = extract_glcm_texture_advanced(
+                        image_bgr, distances, angles, glcm_method
+                    )
+                elif "高级特征 (SIFT)" in feature_type:
+                    result_rgb, features, feature_points = extract_sift_features_advanced(
+                        image_bgr, nfeatures, nOctaveLayers, contrastThreshold
+                    )
+                else:  # ORB
+                    result_rgb, features, feature_points = extract_orb_features_advanced(
+                        image_bgr, nfeatures, scaleFactor, nlevels
+                    )
+                
+            st.success("✅ 特征提取完成！")
+            
+            # 显示对比
+            st.markdown(f"### 🔍 {feature_type}结果")
+            
+            # 使用两列布局显示结果
+            col_result1, col_result2 = st.columns(2)
+            with col_result1:
+                st.image(image_rgb, caption="原始图像", use_container_width=True)
+            with col_result2:
+                st.image(result_rgb, caption=f"{feature_type}结果", use_container_width=True)
+            
+            # 显示特征统计信息
+            if features:
+                st.markdown("### 📊 特征统计信息")
+                
+                # 创建三列显示特征信息
+                feat_col1, feat_col2, feat_col3 = st.columns(3)
+                
+                # 将特征字典分成三部分显示
+                feature_items = list(features.items())
+                chunk_size = (len(feature_items) + 2) // 3
+                
+                with feat_col1:
+                    for key, value in feature_items[:chunk_size]:
+                        st.metric(key, value)
+                
+                with feat_col2:
+                    for key, value in feature_items[chunk_size:2*chunk_size]:
+                        st.metric(key, value)
+                
+                with feat_col3:
+                    for key, value in feature_items[2*chunk_size:]:
+                        st.metric(key, value)
+            
+            # 如果检测到特征点，显示特征点分布图（优化版）
+            if feature_points and len(feature_points) > 0:
+                st.markdown("### 🎯 特征点分布热力图")
+                
+                # 获取图像尺寸
+                height, width = image_bgr.shape[:2]
+                
+                # 创建特征点分布热力图
+                heatmap = np.zeros((height, width), dtype=np.float32)
+                
+                # 统计特征点密度（确保坐标顺序正确）
+                for point in feature_points:
+                    # 根据返回格式调整坐标顺序
+                    # 大多数情况下 feature_points 是 (y, x) 格式
+                    if len(point) == 2:
+                        y, x = point
+                        # 边界检查，如果超出范围则交换坐标
+                        if 0 <= y < height and 0 <= x < width:
+                            heatmap[y, x] += 1
+                        else:
+                            # 尝试交换坐标
+                            x, y = point
+                            if 0 <= y < height and 0 <= x < width:
+                                heatmap[y, x] += 1
+                
+                # 动态调整模糊核大小（根据图像尺寸）
+                blur_size = max(5, min(31, height // 20, width // 20))
+                if blur_size % 2 == 0:
+                    blur_size += 1
+                
+                # 高斯模糊生成平滑的热力图
+                heatmap = cv2.GaussianBlur(heatmap, (blur_size, blur_size), 5)
+                
+                # 归一化到 0-255
+                if np.max(heatmap) > 0:
+                    heatmap = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX)
+                
+                # 应用颜色映射
+                heatmap_color = cv2.applyColorMap(np.uint8(heatmap), cv2.COLORMAP_JET)
+                heatmap_rgb = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
+                
+                # 叠加原始图像
+                alpha = 0.6  # 原始图像权重
+                beta = 0.4   # 热力图权重
+                overlay = cv2.addWeighted(image_rgb, alpha, heatmap_rgb, beta, 0)
+                
+                # 两列显示热力图和叠加图
+                col_heat1, col_heat2 = st.columns(2)
+                with col_heat1:
+                    st.image(heatmap_rgb, caption="特征点密度热力图", use_container_width=True)
+                with col_heat2:
+                    st.image(overlay, caption="特征点分布叠加图", use_container_width=True)
+                
+                # 添加特征点统计信息
+                st.markdown("### 📈 特征点统计")
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                with col_stat1:
+                    st.metric("检测到的特征点数", len(feature_points))
+                with col_stat2:
+                    # 计算特征点密度（每万像素的特征点数）
+                    density = len(feature_points) / (height * width) * 10000
+                    st.metric("特征点密度", f"{density:.2f}/万像素")
+                with col_stat3:
+                    # 计算最大密度区域
+                    max_density = np.max(heatmap)
+                    st.metric("最大密度值", f"{max_density:.1f}")
+            
+            # 下载结果
+            provide_download_button(result_rgb, f"feature_{feature_type.replace(' ', '_')}.jpg", "📥 下载结果")
+    else:
+        st.info("请上传图像文件或从素材库选择开始处理")
+    
+    # 实验总结区域
+    st.markdown("---")
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #fef2f2, #fff); padding: 20px; border-radius: 15px; border: 1px solid #dc2626; margin-top: 20px;'>
+        <h4 style='color: #dc2626; margin-top: 0;'>📚 知识拓展</h4>
+        <p><strong>🔍 特征提取的核心应用场景：</strong></p>
+        <ul>
+            <li><strong>图像匹配与配准：</strong>利用角点特征实现图像间的精确匹配，广泛应用于全景拼接、三维重建等领域。</li>
+            <li><strong>目标检测与识别：</strong>通过边缘、纹理特征实现物体检测和分类，是计算机视觉的基础技术。</li>
+            <li><strong>人脸识别系统：</strong>提取人脸的关键点、纹理特征，实现身份认证和表情分析。</li>
+            <li><strong>医学图像分析：</strong>从CT、MRI等医学图像中提取病变区域特征，辅助医生诊断。</li>
+            <li><strong>工业自动化检测：</strong>提取产品表面的缺陷特征，实现自动化质量控制。</li>
+        </ul>
+        <p><strong>💡 核心知识点：</strong>特征提取是计算机视觉的基石，将高维图像数据降维为有意义的特征向量。
+        <ul>
+            <li><strong>角点特征：</strong>图像中梯度变化剧烈的点，具有旋转不变性，如Harris、Shi-Tomasi算法。</li>
+            <li><strong>边缘特征：</strong>图像中亮度变化明显的像素集合，Canny、Sobel等算法可精确提取。</li>
+            <li><strong>纹理特征：</strong>描述图像表面结构和规律，LBP、GLCM等算法量化纹理模式。</li>
+            <li><strong>SIFT/ORB：</strong>尺度不变特征变换，具有旋转和尺度不变性的高级特征描述子。</li>
+        </ul>
+        特征提取的质量直接影响后续分类、识别任务的准确性，是连接图像数据与高层语义理解的关键桥梁。</p>
+        <p style='margin-top: 10px; font-style: italic; color: #666;'>“特征即本质，提取即理解” — 从海量图像数据中抓住关键特征，实现精准智能识别</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class='ideology-card'>
+        <h4>🎯 思政关联：特征思维与精准识别</h4>
+        <p>
+        特征提取技术体现了<strong style='color: #dc2626;'>去伪存真、抓住本质</strong>的思维方式，
+        从复杂图像中提取关键特征，这反映了<strong style='color: #dc2626;'>精准识别</strong>的科学方法。
+        在技术学习中，我们要培养抓住主要矛盾的思维能力。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 # 底部信息
 st.markdown("""
 <div style='text-align: center; margin-top: 40px; color: #666; font-size: 0.9rem;'>
-    <p>🔬 数字图像处理实验室 v3.0 | 融合思政教育 | 培养创新人才</p>
-    <p>© 2025 图像处理融思政平台 | 技术支持：OpenCV, Streamlit, NumPy</p>
+    <p>🔬 数字图像处理实验室 v3.0 | 融合思政教育 | 培养创新实践人才</p>
+    <p>© 图像处理融思政平台 | 技术支持：OpenCV, Streamlit, NumPy</p>
 </div>
 """, unsafe_allow_html=True)
