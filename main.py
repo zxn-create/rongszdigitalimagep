@@ -1423,7 +1423,7 @@ def main():
     # 主标题区域
     st.markdown("""
     <div class='modern-header'>
-        <h1>融思政 - 数字图像处理实验平台</h1>
+        <h1>视界：数字图像处理课程思政教学平台</h1>
         <p class='subtitle'>融国家之情怀，思技术之正道，育时代之新人</p>
     </div>
     """, unsafe_allow_html=True)
